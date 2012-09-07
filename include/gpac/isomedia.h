@@ -227,7 +227,16 @@ enum
 	GF_ISOM_SUBTYPE_3GP_DIMS	= GF_4CC( 'd', 'i', 'm', 's' ),
 
 	GF_ISOM_SUBTYPE_AC3			= GF_4CC( 'a', 'c', '-', '3' ),
-
+	GF_ISOM_SUBTYPE_SAC3        = GF_4CC( 's', 'a', 'c', '3' ),
+	GF_ISOM_SUBTYPE_EAC3        = GF_4CC( 'e', 'a', 'c', '3' ),
+	GF_ISOM_SUBTYPE_DTSC        = GF_4CC( 'd', 't', 's', 'c' ),
+	GF_ISOM_SUBTYPE_DTSH        = GF_4CC( 'd', 't', 's', 'h' ),
+	GF_ISOM_SUBTYPE_DTSL        = GF_4CC( 'd', 't', 's', 'l' ),
+	GF_ISOM_SUBTYPE_DTSE        = GF_4CC( 'd', 't', 's', 'e' ),
+ 
+	GF_ISOM_SUBTYPE_DRAC        = GF_4CC( 'd', 'r', 'a', 'c' ),
+	GF_ISOM_SUBTYPE_VC1         = GF_4CC( 'v', 'c', '-', '1' ),
+	
 	GF_ISOM_SUBTYPE_LSR1		= GF_4CC( 'l', 's', 'r', '1' ),
 };
 

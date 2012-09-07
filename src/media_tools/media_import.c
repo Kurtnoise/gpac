@@ -1687,6 +1687,8 @@ GF_Err gf_import_isomedia(GF_MediaImporter *import)
 			case GF_ISOM_SUBTYPE_3GP_EVRC:
 			case GF_ISOM_SUBTYPE_3GP_QCELP:
 			case GF_ISOM_SUBTYPE_3GP_SMV:
+			case GF_ISOM_SUBTYPE_AC3: 
+			case GF_ISOM_SUBTYPE_SAC3:
 				break;
 			default:
 				switch (mtype) {
