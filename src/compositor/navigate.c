@@ -210,6 +210,7 @@ Bool gf_sc_fit_world_to_screen(GF_Compositor *compositor)
 		return 0;
 	}
 	memset(&tr_state, 0, sizeof(GF_TraverseState));
+	gf_mx_init(tr_state.model_matrix);
 	tr_state.traversing_mode = TRAVERSE_GET_BOUNDS;
 	tr_state.visual = compositor->visual;
 	gf_node_traverse(top, &tr_state);
@@ -470,7 +471,7 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 				if ( (keys & GF_KEY_MOD_SHIFT) && (compositor->visual->nb_views > 1) ) {
 					compositor->view_distance_offset += key_inv * (is_pixel_metrics ? INT2FIX(1) : FLT2FIX(0.1));
 					cam->flags |= CAM_IS_DIRTY;
-					fprintf(stdout, "AutoStereo view distance %f\n", FIX2FLT(compositor->view_distance_offset + compositor->video_out->view_distance)/100);
+					fprintf(stderr, "AutoStereo view distance %f\n", FIX2FLT(compositor->view_distance_offset + compositor->video_out->view_distance)/100);
 					gf_sc_invalidate(compositor, NULL);
 					return 1;
 				}
@@ -505,7 +506,7 @@ static Bool compositor_handle_navigation_3d(GF_Compositor *compositor, GF_Event 
 			if (keys & GF_KEY_MOD_ALT) {
 				if ( (keys & GF_KEY_MOD_SHIFT) && (compositor->visual->nb_views > 1) ) {
 					compositor->interoccular_offset += FLT2FIX(0.5) * key_inv;
-					fprintf(stdout, "AutoStereo interoccular distance %f\n", FIX2FLT(compositor->interoccular_distance + compositor->interoccular_offset));
+					fprintf(stderr, "AutoStereo interoccular distance %f\n", FIX2FLT(compositor->interoccular_distance + compositor->interoccular_offset));
 					cam->flags |= CAM_IS_DIRTY;
 					gf_sc_invalidate(compositor, NULL);
 					return 1;

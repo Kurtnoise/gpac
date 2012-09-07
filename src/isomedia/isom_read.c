@@ -1771,7 +1771,7 @@ GF_Err gf_isom_get_chunks_infos(GF_ISOFile *movie, u32 trackNumber, u32 *dur_min
 			davg += chunk_dur;
 			if (smin>chunk_size) smin = chunk_size;
 			if (smax<chunk_size) smax = chunk_size;
-			savg += chunk_dur;
+			savg += chunk_size;
 			
 			tot_chunks ++;
 			sample_idx += stsc->entries[i].samplesPerChunk;
@@ -1780,8 +1780,10 @@ GF_Err gf_isom_get_chunks_infos(GF_ISOFile *movie, u32 trackNumber, u32 *dur_min
 			if (stsc->entries[i].firstChunk + nb_chunk == stsc->entries[i+1].firstChunk) break;
 		}
 	}
-	if (tot_chunks) davg /= tot_chunks;
-
+	if (tot_chunks) {
+		davg /= tot_chunks;
+		savg /= tot_chunks;
+	}
 	if (dur_min) *dur_min = dmin;
 	if (dur_avg) *dur_avg = (u32) davg;
 	if (dur_max) *dur_max = dmax;
@@ -1956,6 +1958,7 @@ GF_Err gf_isom_release_segment(GF_ISOFile *movie, Bool reset_tables)
 
 	for (i=0; i<gf_list_count(movie->moov->trackList); i++) {
 		GF_TrackBox *trak = gf_list_get(movie->moov->trackList, i);
+		trak->first_traf_merged = 0;
 		if (trak->Media->information->dataHandler == movie->movieFileMap) {
 			trak->Media->information->dataHandler = NULL;
 		}
@@ -1988,7 +1991,6 @@ GF_Err gf_isom_release_segment(GF_ISOFile *movie, Bool reset_tables)
 		}
 	}
 
-	movie->first_moof_merged = 0;
 	gf_isom_datamap_del(movie->movieFileMap);
 	movie->movieFileMap = NULL;
 #endif

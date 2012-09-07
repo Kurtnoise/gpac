@@ -30,8 +30,7 @@
 #include <stdio.h>
 #include <gpac/network.h>
 
-/*#define MYLOG(xx) GF_LOG(GF_LOG_INFO, GF_LOG_CONTAINER, xx )*/
-//#define MYLOG(xx) printf xx
+/*#define MYLOG(xx) GF_LOG(GF_LOG_INFO, GF_LOG_DASH, xx )*/
 #define MYLOG(xx)
 
 
@@ -233,19 +232,19 @@ GF_Err playlist_element_dump(const PlaylistElement * e, int indent) {
 	int i;
 	GF_Err r = GF_OK;
 	for (i = 0 ; i < indent; i++)
-		printf(" ");
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, (" ") );
 	if (e == NULL) {
-		printf("NULL PlaylistElement\n");
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8] NULL PlaylistElement\n"));
 		return r;
 	}
-	printf("PlayListElement[%p, title=%s, codecs=%s, duration=%d, bandwidth=%d, url=%s, type=%s]\n",
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8] PlayListElement[%p, title=%s, codecs=%s, duration=%d, bandwidth=%d, url=%s, type=%s]\n",
 		(void*)e,
 		e->title,
 		e->codecs,
 		e->durationInfo,
 		e->bandwidth,
 		e->url,
-		e->elementType == TYPE_STREAM ? "stream" : "playlist");
+		e->elementType == TYPE_STREAM ? "stream" : "playlist"));
 	if (TYPE_PLAYLIST == e->elementType) {
 		int sz;
 		assert( e->element.playlist.elements);
@@ -264,17 +263,17 @@ GF_Err variant_playlist_dump(const VariantPlaylist * pl) {
 	int i, count;
 	GF_Err e = GF_OK;
 	if (pl == NULL) {
-		printf("VariantPlaylist = NULL\n");
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8] VariantPlaylist = NULL\n"));
 		return e;
 	}
-	printf("VariantPlaylist = {\n");
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8] VariantPlaylist = {\n"));
 	assert( pl->programs);
 	count = gf_list_count( pl->programs);
 	for (i = 0 ; i < count ; i++) {
 		int j, countj;
 		Program * p = gf_list_get(pl->programs, i);
 		assert( p );
-		printf("  program[programId=%d]{\n",  p->programId);
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8] program[programId=%d]{\n",  p->programId));
 		assert( p->bitrates );
 		countj = gf_list_count(p->bitrates);
 		for (j = 0; j < countj; j++) {
@@ -282,9 +281,9 @@ GF_Err variant_playlist_dump(const VariantPlaylist * pl) {
 			assert(el);
 			e |= playlist_element_dump( el, 4);
 		}
-		printf("  }\n");
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8] }\n"));
 	}
-	printf("}\n");
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[M3U8]}\n"));
 	return e;
 }
 
@@ -469,7 +468,7 @@ static char ** parseAttributes(const char * line, s_accumulated_attributes * att
 					attributes->byteRangeStart = begin;
 					attributes->byteRangeEnd = begin + size - 1;
 				} else {
-					GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER,("[M3U8] Invalid byte range %s\n", ret[0]));
+					GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] Invalid byte range %s\n", ret[0]));
 				}
 			}
 		}
@@ -495,7 +494,7 @@ GF_Err parse_sub_playlist(const char * file, VariantPlaylist ** playlist, const 
 	s_accumulated_attributes attribs;
 	f = gf_f64_open(file, "rt");
 	if (!f) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER,("[M3U8] Cannot Open m3u8 file %s for reading\n", file));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_DASH,("[M3U8] Cannot Open m3u8 file %s for reading\n", file));
 		return GF_SERVICE_ERROR;
 	}
 	if (*playlist == NULL) {
@@ -532,7 +531,7 @@ GF_Err parse_sub_playlist(const char * file, VariantPlaylist ** playlist, const 
 			if (len < 7 || strncmp("#EXTM3U", currentLine, 7)!=0) {
 				fclose(f);
 				variant_playlist_del(pl);
-				GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("Failed to parse M3U8 File, it should start with #EXTM3U, but was : %s\n", currentLine));
+				GF_LOG(GF_LOG_ERROR, GF_LOG_DASH, ("Failed to parse M3U8 File, it should start with #EXTM3U, but was : %s\n", currentLine));
 				return GF_STREAM_NOT_FOUND;
 			}
 			continue;
@@ -562,7 +561,6 @@ GF_Err parse_sub_playlist(const char * file, VariantPlaylist ** playlist, const 
 			}
 		} else {
 			char * fullURL = currentLine;
-			//printf("Line %d: '%s'\n", currentLineNumber, currentLine);
 
 			if (gf_url_is_local(currentLine)) {
 				/*
@@ -582,7 +580,6 @@ GF_Err parse_sub_playlist(const char * file, VariantPlaylist ** playlist, const 
 					fullURL = gf_url_concatenate(baseURL, currentLine);
 			}
 			assert( fullURL );
-			/*printf("*** calculated full path = %s from %s and %s\n", fullURL, currentLine, baseURL);*/
 			}
 			{
 				u32 count;

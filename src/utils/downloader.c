@@ -1358,6 +1358,7 @@ GF_Err gf_dm_sess_process(GF_DownloadSession *sess)
     return sess->last_error;
 }
 
+GF_EXPORT
 GF_Err gf_dm_sess_process_headers(GF_DownloadSession *sess)
 {
     Bool go;
@@ -2213,7 +2214,7 @@ static GF_Err wait_for_header_and_parse(GF_DownloadSession *sess, char * sHTTP)
         gf_dm_sess_user_io(sess, &par);
 #endif
 
-        GF_LOG(GF_LOG_DEBUG, GF_LOG_NETWORK, ("[HTTP] Processing header %s: %s\n", hdr, hdr_val));
+ //       GF_LOG(GF_LOG_DEBUG, GF_LOG_NETWORK, ("[HTTP] Processing header %s: %s\n", hdr, hdr_val));
 
         if (!stricmp(hdr, "Content-Length") ) {
             ContentLength = (u32) atoi(hdr_val);

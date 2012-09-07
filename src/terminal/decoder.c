@@ -677,6 +677,8 @@ static GF_Err MediaCodec_Process(GF_Codec *codec, u32 TimeAvailable)
 		/*if no data, and channel not buffering, ABORT CB buffer (data timeout or EOS not detectable)*/
 		else if (ch && !ch->BufferOn)
 			gf_cm_abort_buffering(codec->CB);
+
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_CODEC, ("[%s] ODM%d: No data in decoding buffer\n", codec->decio->module_name, codec->odm->OD->objectDescriptorID));
 		return GF_OK;
 	}
 
@@ -687,6 +689,15 @@ static GF_Err MediaCodec_Process(GF_Codec *codec, u32 TimeAvailable)
 	if (!codec->CB) {
 		gf_es_drop_au(ch);
 		return GF_BAD_PARAM;
+	}
+	/*we are still flushing our CB - keep the current pending AU and wait for CB resize*/
+	if (codec->force_cb_resize) {
+		if (codec->CB->UnitCount>1) {
+			return GF_OK;
+		}
+		GF_LOG(GF_LOG_INFO, GF_LOG_CODEC, ("[%s] ODM%d: Resizing output buffer %d -> %d\n", codec->decio->module_name, codec->odm->OD->objectDescriptorID, codec->CB->UnitSize, codec->force_cb_resize));
+		ResizeCompositionBuffer(codec, codec->force_cb_resize);
+		codec->force_cb_resize=0;
 	}
 
 	/*image codecs*/
@@ -771,7 +782,6 @@ static GF_Err MediaCodec_Process(GF_Codec *codec, u32 TimeAvailable)
 
 		/*when using temporal scalability make sure we can decode*/
 		if (ch->esd->dependsOnESID && (codec->last_unit_dts > AU->DTS)){
-//			printf("SCALABLE STREAM DEAD!!\n");
 			goto drop;
 		}
 
@@ -802,6 +812,14 @@ scalable_retry:
 		case GF_BUFFER_TOO_SMALL:
 			/*release but no dispatch*/
 			UnlockCompositionUnit(codec, CU, 0);
+
+			/*if we have pending media do wait! - this shoud be fixed by avoiding to destroy the CB ... */
+			if (codec->CB->UnitCount>1) {
+				GF_LOG(GF_LOG_INFO, GF_LOG_CODEC, ("[%s] ODM%d: Resize output buffer requested\n", codec->decio->module_name, codec->odm->OD->objectDescriptorID));
+				codec->force_cb_resize = unit_size;
+				return GF_OK;
+			}
+			GF_LOG(GF_LOG_INFO, GF_LOG_CODEC, ("[%s] ODM%d: Resizing output buffer %d -> %d\n", codec->decio->module_name, codec->odm->OD->objectDescriptorID, codec->CB->UnitSize, unit_size));
 			ResizeCompositionBuffer(codec, unit_size);
 			continue;
 

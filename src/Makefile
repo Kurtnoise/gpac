@@ -43,12 +43,25 @@ LIBGPAC_ISOM+=isomedia/hint_track.o isomedia/hinting.o
 endif
 
 ## libgpac objects gathering: src/odf
-LIBGPAC_ODF=odf/desc_private.o odf/descriptors.o odf/ipmpx_code.o odf/oci_codec.o odf/odf_code.o odf/odf_codec.o odf/odf_command.o odf/qos.o odf/slc.o 
+LIBGPAC_ODF=odf/desc_private.o odf/descriptors.o odf/odf_code.o odf/odf_codec.o odf/odf_command.o odf/qos.o odf/slc.o 
+ifeq ($(MINIMAL_OD), no)
+LIBGPAC_ODF+=odf/ipmpx_code.o odf/oci_codec.o 
+
 ifeq ($(DISABLE_OD_DUMP), no)
-LIBGPAC_ODF+=odf/odf_dump.o odf/ipmpx_dump.o
+LIBGPAC_ODF+=odf/ipmpx_dump.o
+endif
+
+ifeq ($(DISABLE_OD_PARSE), no)
+LIBGPAC_ODF+=odf/ipmpx_parse.o
+endif
+
+endif
+
+ifeq ($(DISABLE_OD_DUMP), no)
+LIBGPAC_ODF+=odf/odf_dump.o
 endif
 ifeq ($(DISABLE_OD_PARSE), no)
-LIBGPAC_ODF+=odf/odf_parse.o odf/ipmpx_parse.o
+LIBGPAC_ODF+=odf/odf_parse.o
 endif
 
 ## libgpac objects gathering: src/scenegraph
@@ -73,6 +86,9 @@ LIBGPAC_MEDIATOOLS+=media_tools/mpegts.o
 endif
 ifeq ($(DISABLE_MPD), no)
 LIBGPAC_MEDIATOOLS+=media_tools/m3u8.o media_tools/mpd.o
+endif
+ifeq ($(DISABLE_DASH_CLIENT), no)
+LIBGPAC_MEDIATOOLS+=media_tools/dash_client.o
 endif
 ifeq ($(DISABLE_MEDIA_EXPORT), no)
 LIBGPAC_MEDIATOOLS+=media_tools/media_export.o

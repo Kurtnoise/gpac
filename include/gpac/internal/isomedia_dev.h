@@ -520,6 +520,7 @@ typedef struct
 #ifndef	GPAC_DISABLE_ISOM_FRAGMENTS
 	u64 dts_at_seg_start;
 	u32 sample_count_at_seg_start;
+	Bool first_traf_merged;
 #endif 
 } GF_TrackBox;
 
@@ -2153,6 +2154,7 @@ typedef struct
 {
 	GF_ISOM_BASE_DATA_HANDLER
 	FILE *stream;
+	Bool is_stdout;
 	Bool last_acces_was_read;
 #ifndef GPAC_DISABLE_ISOM_WRITE
 	char *temp_file;
@@ -2262,7 +2264,6 @@ struct __tag_isom {
 
 #ifndef	GPAC_DISABLE_ISOM_FRAGMENTS
 	u32 FragmentsFlags, NextMoofNumber;
-	Bool first_moof_merged;
 	/*active fragment*/
 	GF_MovieFragmentBox *moof;
 	/*in WRITE mode, this is the current MDAT where data is written*/

@@ -28,6 +28,10 @@
 #include <gpac/internal/m3u8.h>
 #include <gpac/network.h>
 
+#ifndef _WIN32_WCE
+/*for mktime*/
+#include <time.h>
+#endif
 
 static Bool gf_mpd_parse_bool(char *attr)
 {
@@ -60,6 +64,13 @@ static u32 gf_mpd_parse_int(char *attr)
 	return atoi(attr);
 }
 
+static u64 gf_mpd_parse_long_int(char *attr)
+{
+	u64 longint;
+	sscanf(attr, LLU, &longint);
+	return longint;
+}
+
 static Double gf_mpd_parse_double(char *attr)
 {
 	return atof(attr);
@@ -75,8 +86,51 @@ static GF_MPD_Fractional *gf_mpd_parse_frac(char *attr)
 
 static u64 gf_mpd_parse_date(char *attr)
 {
-	fprintf(stdout, "error: mpd parse date not implemented\n");
+#ifdef _WIN32_WCE
+	GF_LOG(GF_LOG_WARNING, GF_LOG_DASH, ("[M3U8] Parsing MPD date (%s) is not supported on Windows CE\n", attr));
 	return 0;
+#else
+	Bool ok = 0;
+	Bool neg_time_zone = 0;
+	u32 year, month, day, h, m;
+	s32 oh, om;
+	Float s;
+
+	h = m = 0;
+	s = 0;
+	oh = om = 0;
+	if (strchr(attr, 'Z')) {
+		if (sscanf(attr, "%d-%d-%dT%d:%d:%gZ", &year, &month, &day, &h, &m, &s) == 6) 
+			ok = 1;
+		else if (sscanf(attr, "%d-%d-%dT%d:%d:%g-%d:%d", &year, &month, &day, &h, &m, &s, &oh, &om) == 8) {
+			neg_time_zone = 1;
+			ok = 1;
+		} else if (sscanf(attr, "%d-%d-%dT%d:%d:%g+%d:%d", &year, &month, &day, &h, &m, &s, &oh, &om) == 8) 
+			ok = 1;
+		
+		/*there are many other formats ...*/
+	}
+	if (ok) {
+		u64 res;
+		struct tm _t;
+		_t.tm_year = (year > 1900) ? year - 1900 : 0;
+		_t.tm_mon = month ? month - 1 : 0;
+		_t.tm_mday = day;
+		_t.tm_hour = h;
+		_t.tm_min = m;
+		_t.tm_sec = (u32) s;
+		res = mktime(&_t);
+		if (om || oh) {
+			s32 diff = (60*oh + om)*60;
+			if (neg_time_zone) diff = -diff;
+			res = res + diff;
+		}
+		return res;
+	} else {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_DASH, ("[M3U8] Failed to parse MPD date %s - format not supported\n", attr));
+	}
+	return 0;
+#endif
 }
 
 static u32 gf_mpd_parse_duration(char *duration) {
@@ -146,7 +200,7 @@ static GF_Err gf_mpd_parse_location(GF_MPD *mpd, GF_XMLNode *child)
 
 static GF_Err gf_mpd_parse_metrics(GF_MPD *mpd, GF_XMLNode *child)
 {
-	fprintf(stdout, "mpd metrics not implemented yet\n");
+	GF_LOG(GF_LOG_WARNING, GF_LOG_DASH, ("[MPD] Metrics not implemented yet\n"));
 	return GF_OK;
 }
 
@@ -282,9 +336,12 @@ static GF_MPD_SegmentTimeline *gf_mpd_parse_segment_timeline(GF_XMLNode *root)
 
 			j = 0;
 			while ( (att = gf_list_enum(child->attributes, &j)) ) {
-				if (!strcmp(att->name, "t")) segent->start_time = gf_mpd_parse_int(att->value);
-				else if (!strcmp(att->name, "d")) segent->duration = gf_mpd_parse_int(att->value);
-				else if (!strcmp(att->name, "r")) segent->repeat_count = gf_mpd_parse_int(att->value);
+				if (!strcmp(att->name, "t")) 
+					segent->start_time = gf_mpd_parse_long_int(att->value);
+				else if (!strcmp(att->name, "d")) 
+					segent->duration = gf_mpd_parse_int(att->value);
+				else if (!strcmp(att->name, "r")) 
+					segent->repeat_count = gf_mpd_parse_int(att->value);
 			}
 		}
 	}
@@ -355,8 +412,8 @@ static GF_MPD_SegmentList *gf_mpd_parse_segment_list(GF_XMLNode *root)
 
 	i = 0;
 	while ( (att = gf_list_enum(root->attributes, &i)) ) {
-		if (strstr(att->name, "href") || strstr(att->name, "actuate")) {
-		} 
+		if (strstr(att->name, "href")) seg->xlink_href = gf_mpd_parse_string(att->value);
+		else if (strstr(att->name, "actuate")) seg->xlink_actuate_on_load = !strcmp(att->value, "onLoad") ? 1 : 0;
 	}
 	gf_mpd_parse_multiple_segment_base((GF_MPD_MultipleSegmentBase *)seg, root);
 
@@ -534,8 +591,8 @@ static GF_Err gf_mpd_parse_adaptation_set(GF_List *container, GF_XMLNode *root)
 
 	i = 0;
 	while ( (att = gf_list_enum(root->attributes, &i)) ) {
-		if (strstr(att->name, "href") || strstr(att->name, "actuate")) {
-		} 
+		if (strstr(att->name, "href")) set->xlink_href = gf_mpd_parse_string(att->value);
+		else if (strstr(att->name, "actuate")) set->xlink_actuate_on_load = !strcmp(att->value, "onLoad") ? 1 : 0;
 		else if (!strcmp(att->name, "id")) set->id = gf_mpd_parse_int(att->value);
 		else if (!strcmp(att->name, "group")) set->group = gf_mpd_parse_int(att->value);
 		else if (!strcmp(att->name, "lang")) set->lang = gf_mpd_parse_string(att->value);
@@ -621,8 +678,8 @@ static GF_Err gf_mpd_parse_period(GF_MPD *mpd, GF_XMLNode *root)
 
 	i = 0;
 	while ( (att = gf_list_enum(root->attributes, &i)) ) {
-		if (strstr(att->name, "href") || strstr(att->name, "actuate")) {
-		} 
+		if (strstr(att->name, "href")) period->xlink_href = gf_mpd_parse_string(att->value);
+		else if (strstr(att->name, "actuate")) period->xlink_actuate_on_load = !strcmp(att->value, "onLoad") ? 1 : 0;
 		else if (!strcmp(att->name, "id")) period->ID = gf_mpd_parse_string(att->value);
 		else if (!strcmp(att->name, "start")) period->start = gf_mpd_parse_duration(att->value);
 		else if (!strcmp(att->name, "duration")) period->duration = gf_mpd_parse_duration(att->value);
@@ -703,9 +760,9 @@ void gf_mpd_prog_info_free(void *_item)
 	if (ptr->more_info_url) gf_free(ptr->more_info_url);
 	gf_free(ptr);
 }
-void gf_mpd_segment_url_free(void *_item)
+void gf_mpd_segment_url_free(void *_ptr)
 {
-	GF_MPD_SegmentURL *ptr = (GF_MPD_SegmentURL*)_item;
+	GF_MPD_SegmentURL *ptr = (GF_MPD_SegmentURL *)_ptr;
 	if (ptr->index) gf_free(ptr->index);
 	if (ptr->index_range) gf_free(ptr->index_range);
 	if (ptr->media) gf_free(ptr->media);
@@ -734,6 +791,7 @@ void gf_mpd_segment_timeline_free(void *_item)
 void gf_mpd_segment_list_free(void *_item)
 {
 	GF_MPD_SegmentList *ptr = (GF_MPD_SegmentList *)_item;
+	if (ptr->xlink_href) gf_free(ptr->xlink_href);
 	if (ptr->initialization_segment) gf_mpd_url_free(ptr->initialization_segment);
 	if (ptr->bitstream_switching_url) gf_mpd_url_free(ptr->bitstream_switching_url);
 	if (ptr->representation_index) gf_mpd_url_free(ptr->representation_index);
@@ -756,13 +814,13 @@ void gf_mpd_segment_template_free(void *_item)
 }
 void gf_mpd_descriptor_free(void *item)
 {
-	fprintf(stdout, "error: descriptor not implemented\n");
+	GF_LOG(GF_LOG_WARNING, GF_LOG_DASH, ("[MPD] descriptor not implemented\n"));
 	gf_free(item);
 }
 
 void gf_mpd_content_component_free(void *item)
 {
-	fprintf(stdout, "error: content component not implemented\n");
+	GF_LOG(GF_LOG_WARNING, GF_LOG_DASH, ("[MPD] content component not implemented\n"));
 	gf_free(item);
 }
 
@@ -787,7 +845,7 @@ void gf_mpd_representation_free(void *_item)
 	if (ptr->dependency_id) gf_free(ptr->dependency_id);
 	if (ptr->media_stream_structure_id) gf_free(ptr->media_stream_structure_id);
 
-	if (ptr->cached_init_segment_url) gf_free(ptr->cached_init_segment_url);
+	if (ptr->playback.cached_init_segment_url) gf_free(ptr->playback.cached_init_segment_url);
 
 	gf_mpd_del_list(ptr->base_URLs, gf_mpd_base_url_free, 0);
 	gf_mpd_del_list(ptr->sub_representations, NULL/*TODO*/, 0);
@@ -804,6 +862,7 @@ void gf_mpd_adaptation_set_free(void *_item)
 	if (ptr->lang) gf_free(ptr->lang);
 	if (ptr->content_type) gf_free(ptr->content_type);
 	if (ptr->par) gf_free(ptr->par);
+	if (ptr->xlink_href) gf_free(ptr->xlink_href);
 	gf_mpd_del_list(ptr->accessibility, gf_mpd_descriptor_free, 0);
 	gf_mpd_del_list(ptr->role, gf_mpd_descriptor_free, 0);
 	gf_mpd_del_list(ptr->rating, gf_mpd_descriptor_free, 0);
@@ -820,6 +879,7 @@ void gf_mpd_period_free(void *_item)
 {
 	GF_MPD_Period *ptr = (GF_MPD_Period *)_item;
 	if (ptr->ID) gf_free(ptr->ID);
+	if (ptr->xlink_href) gf_free(ptr->xlink_href);
 	if (ptr->segment_base) gf_mpd_segment_base_free(ptr->segment_base);
 	if (ptr->segment_list) gf_mpd_segment_list_free(ptr->segment_list);
 	if (ptr->segment_template) gf_mpd_segment_template_free(ptr->segment_template);
@@ -861,6 +921,8 @@ GF_Err gf_mpd_init_from_dom(GF_XMLNode *root, GF_MPD *mpd, const char *default_b
 	mpd->metrics = gf_list_new();
 	/*setup some defaults*/
 	mpd->type = GF_MPD_TYPE_STATIC;
+	/*infinite by default*/
+	mpd->time_shift_buffer_depth = (u32) -1;
 
 	att_index = 0;
 	child_index = gf_list_count(root->attributes);
@@ -897,8 +959,8 @@ GF_Err gf_mpd_init_from_dom(GF_XMLNode *root, GF_MPD *mpd, const char *default_b
 			mpd->max_subsegment_duration = gf_mpd_parse_duration(att->value);
 		}
 	}
-	if (mpd->type == GF_MPD_TYPE_STATIC)
-		mpd->minimum_update_period = 0;
+	if (mpd->type == GF_MPD_TYPE_STATIC) 
+		mpd->minimum_update_period = mpd->time_shift_buffer_depth = 0;
 
 	child_index = 0;
 	while (1) {
@@ -947,7 +1009,7 @@ GF_Err gf_m3u8_to_mpd(const char *m3u8_file, const char *base_url,
 
 	e = parse_root_playlist(m3u8_file, &pl, base_url);
 	if (e) {
-		GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("[M3U8] Failed to parse root playlist '%s', error = %s\n", m3u8_file, gf_error_to_string(e)));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_DASH, ("[M3U8] Failed to parse root playlist '%s', error = %s\n", m3u8_file, gf_error_to_string(e)));
 		if (pl) variant_playlist_del(pl);
 		pl = NULL;
 		return e;
@@ -989,7 +1051,7 @@ GF_Err gf_m3u8_to_mpd(const char *m3u8_file, const char *base_url,
 
 			if (!suburl || !strcmp(base_url, suburl)) {
 				if (suburl) gf_free(suburl);
-				GF_LOG(GF_LOG_DEBUG, GF_LOG_MODULE, ("[MPD Generator] Not downloading, programs are identical for %s...\n", pe->url));
+				GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[MPD Generator] Not downloading, programs are identical for %s...\n", pe->url));
 				continue;
 			}
 			if (getter && getter->new_session && getter->del_session && getter->get_cache_name) {
@@ -1053,15 +1115,15 @@ GF_Err gf_m3u8_to_mpd(const char *m3u8_file, const char *base_url,
 	}
 	if (is_end || ((the_pe->elementType == TYPE_PLAYLIST) && the_pe->element.playlist.is_ended)) {
 		update_interval = 0;
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_MODULE, ("[MPD Generator] NO NEED to refresh playlist !\n"));
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[MPD Generator] NO NEED to refresh playlist !\n"));
 	} else {
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_MODULE, ("[MPD Generator] Playlist will be refreshed every %g seconds, len=%d\n", update_interval, the_pe->durationInfo));
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_DASH, ("[MPD Generator] Playlist will be refreshed every %g seconds, len=%d\n", update_interval, the_pe->durationInfo));
 	}
 
 	assert( mpd_file );
 	fmpd = gf_f64_open(mpd_file, "wt");
 	if (!fmpd){
-		GF_LOG(GF_LOG_ERROR, GF_LOG_MODULE, ("[MPD Generator] Cannot write to temp file %s!\n", mpd_file));
+		GF_LOG(GF_LOG_ERROR, GF_LOG_DASH, ("[MPD Generator] Cannot write to temp file %s!\n", mpd_file));
 		variant_playlist_del(pl);
 		return GF_IO_ERR;
 	}
@@ -1245,9 +1307,9 @@ GF_Err gf_m3u8_to_mpd(const char *m3u8_file, const char *base_url,
 			pe = gf_list_get(prog->bitrates, j);
 			
 			if (pe->elementType == TYPE_STREAM) {
-				fprintf(stdout, "NOT SUPPORTED: M3U8 Stream\n");
+				GF_LOG(GF_LOG_WARNING, GF_LOG_DASH, ("[MPD] NOT SUPPORTED: M3U8 Stream\n"));
 			} else if (pe->elementType != TYPE_PLAYLIST) {
-				fprintf(stdout, "NOT SUPPORTED: M3U8 unknown type\n");
+				GF_LOG(GF_LOG_WARNING, GF_LOG_DASH, ("[MPD] NOT SUPPORTED: M3U8 unknown type\n"));
 			}
 
 			count3 = gf_list_count(pe->element.playlist.elements);

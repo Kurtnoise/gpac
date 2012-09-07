@@ -19,6 +19,6 @@
 	<key>CFBundleSignature</key>
 	<string>gpac</string>
 	<key>CFBundleVersion</key>
-	<string>9999</string><!-- BUILD_REV_REPLACE -->
+	<string>9999</string><!-- BUILD_REV_REPLACE --> 
 </dict>
 </plist>
