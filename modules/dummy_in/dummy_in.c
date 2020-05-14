@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -43,6 +43,7 @@ typedef struct
 	GF_ClientService *service;
 	char *url;
 	u32 oti;
+	Bool is_views_url;
 	GF_List *channels;
 
 	/*file downloader*/
@@ -68,80 +69,87 @@ Bool DC_RemoveChannel(DCReader *read, LPNETCHANNEL ch)
 		if (dc->ch && dc->ch==ch) {
 			gf_list_rem(read->channels, i-1);
 			gf_free(dc);
-			return 1;
+			return GF_TRUE;
 		}
 	}
-	return 0;
+	return GF_FALSE;
 }
 
 static const char * DC_MIME_TYPES[] = {
-/*  "application/x-xmta", "xmta xmta.gz xmtaz", "MPEG-4 Text (XMT)" */
-    "application/x-bt", "bt bt.gz btz", "MPEG-4 Text (BT)",
-    "application/x-xmt", "xmt xmt.gz xmtz", "MPEG-4 Text (XMT)",
-    "model/vrml", "wrl wrl.gz", "VRML World",
-    "x-model/x-vrml", "wrl wrl.gz", "VRML World",
-    "model/x3d+vrml", "x3dv x3dv.gz x3dvz", "X3D/VRML World",
-    "model/x3d+xml", "x3d x3d.gz x3dz", "X3D/XML World",
-    "application/x-shockwave-flash", "swf", "Macromedia Flash Movie",
-    "image/svg+xml", "svg svg.gz svgz", "SVG Document",
-    "image/x-svgm", "svgm", "SVGM Document",
-    "application/x-LASeR+xml", "xsr", "LASeR Document",
-    "application/widget", "wgt", "W3C Widget Package",
-    "application/x-mpegu-widget", "mgt", "MPEG-U Widget Package",
-    NULL
+	/*  "application/x-xmta", "xmta xmta.gz xmtaz", "MPEG-4 Text (XMT)" */
+	"application/x-bt", "bt bt.gz btz", "MPEG-4 Text (BT)",
+	"application/x-xmt", "xmt xmt.gz xmtz", "MPEG-4 Text (XMT)",
+	"model/vrml", "wrl wrl.gz", "VRML World",
+	"x-model/x-vrml", "wrl wrl.gz", "VRML World",
+	"model/x3d+vrml", "x3dv x3dv.gz x3dvz", "X3D/VRML World",
+	"model/x3d+xml", "x3d x3d.gz x3dz", "X3D/XML World",
+	"application/x-shockwave-flash", "swf", "Macromedia Flash Movie",
+	"image/svg+xml", "svg svg.gz svgz", "SVG Document",
+	"image/x-svgm", "svgm", "SVGM Document",
+	"application/x-LASeR+xml", "xsr", "LASeR Document",
+	"application/widget", "wgt", "W3C Widget Package",
+	"application/x-mpegu-widget", "mgt", "MPEG-U Widget Package",
+	NULL
 };
 
 
-static u32 DC_RegisterMimeTypes(const GF_InputService *plug){
-    u32 i;
-    if (!plug)
-      return 0;
-    for (i = 0 ; DC_MIME_TYPES[i] ; i+=3)
-      gf_term_register_mime_type(plug, DC_MIME_TYPES[i], DC_MIME_TYPES[i+1], DC_MIME_TYPES[i+2]);
-    return i / 3;
+static u32 DC_RegisterMimeTypes(const GF_InputService *plug) {
+	u32 i;
+	if (!plug)
+		return 0;
+	for (i = 0 ; DC_MIME_TYPES[i] ; i+=3)
+		gf_service_register_mime(plug, DC_MIME_TYPES[i], DC_MIME_TYPES[i+1], DC_MIME_TYPES[i+2]);
+	return i / 3;
 }
 
 Bool DC_CanHandleURL(GF_InputService *plug, const char *url)
 {
 	char *sExt;
-        if (!plug || !url)
-          return 0;
-        sExt = strrchr(url, '.');
+	if (!plug || !url)
+		return GF_FALSE;
+	sExt = strrchr(url, '.');
 	if (sExt) {
-		Bool ok = 0;
+		Bool ok = GF_FALSE;
 		char *cgi_par;
 		if (!strnicmp(sExt, ".gz", 3)) sExt = strrchr(sExt, '.');
-		if (!strnicmp(url, "rtsp://", 7)) return 0;
+		if (!strnicmp(url, "rtsp://", 7)) return GF_FALSE;
 
 		cgi_par = strchr(sExt, '?');
 		if (cgi_par) cgi_par[0] = 0;
 		{
-		  u32 i;
-		  for (i = 0 ; DC_MIME_TYPES[i] ; i+=3)
-		    if (0 != (ok = gf_term_check_extension(plug, DC_MIME_TYPES[i], DC_MIME_TYPES[i+1], DC_MIME_TYPES[i+2], sExt)))
-		      break;
+			u32 i;
+			for (i = 0 ; DC_MIME_TYPES[i] ; i+=3)
+				if (0 != (ok = gf_service_check_mime_register(plug, DC_MIME_TYPES[i], DC_MIME_TYPES[i+1], DC_MIME_TYPES[i+2], sExt)))
+					break;
 		}
 		if (cgi_par) cgi_par[0] = '?';
-		if (ok) return 1;
+		if (ok) return GF_TRUE;
 	}
+	/*views:// internal URI*/
+	if (!strnicmp(url, "views://", 8))
+		return GF_TRUE;
+	/*mosaic:// internal URI*/
+	if (!strnicmp(url, "mosaic://", 9))
+		return GF_TRUE;
 
-	if (!strncmp(url, "\\\\", 2)) return 0;
+
+	if (!strncmp(url, "\\\\", 2)) return GF_FALSE;
 
 	if (!strnicmp(url, "file://", 7) || !strstr(url, "://")) {
 		char *rtype = gf_xml_get_root_type(url, NULL);
 		if (rtype) {
-			Bool handled = 0;
-			if (!strcmp(rtype, "SAFSession")) handled = 1;
-			else if (!strcmp(rtype, "XMT-A")) handled = 1;
-			else if (!strcmp(rtype, "X3D")) handled = 1;
-			else if (!strcmp(rtype, "svg")) handled = 1;
-			else if (!strcmp(rtype, "bindings")) handled = 1;
-			else if (!strcmp(rtype, "widget")) handled = 1;
+			Bool handled = GF_FALSE;
+			if (!strcmp(rtype, "SAFSession")) handled = GF_TRUE;
+			else if (!strcmp(rtype, "XMT-A")) handled = GF_TRUE;
+			else if (!strcmp(rtype, "X3D")) handled = GF_TRUE;
+			else if (!strcmp(rtype, "svg")) handled = GF_TRUE;
+			else if (!strcmp(rtype, "bindings")) handled = GF_TRUE;
+			else if (!strcmp(rtype, "widget")) handled = GF_TRUE;
 			gf_free(rtype);
 			return handled;
 		}
 	}
-	return 0;
+	return GF_FALSE;
 }
 
 void DC_NetIO(void *cbk, GF_NETIO_Parameter *param)
@@ -150,7 +158,7 @@ void DC_NetIO(void *cbk, GF_NETIO_Parameter *param)
 	DCReader *read = (DCReader *) cbk;
 
 	/*handle service message*/
-	gf_term_download_update_stats(read->dnload);
+	gf_service_download_update_stats(read->dnload);
 
 	e = param->error;
 
@@ -177,8 +185,9 @@ void DC_NetIO(void *cbk, GF_NETIO_Parameter *param)
 	/*OK confirm*/
 	if (!read->is_service_connected) {
 		if (!gf_dm_sess_get_cache_name(read->dnload)) e = GF_IO_ERR;
-		gf_term_on_connect(read->service, NULL, e);
-		read->is_service_connected = 1;
+		if (e>0) e = GF_OK;
+		gf_service_connect_ack(read->service, NULL, e);
+		read->is_service_connected = GF_TRUE;
 	}
 }
 
@@ -186,9 +195,9 @@ void DC_DownloadFile(GF_InputService *plug, char *url)
 {
 	DCReader *read = (DCReader *) plug->priv;
 
-	read->dnload = gf_term_download_new(read->service, url, 0, DC_NetIO, read);
+	read->dnload = gf_service_download_new(read->service, url, 0, DC_NetIO, read);
 	if (!read->dnload) {
-		gf_term_on_connect(read->service, NULL, GF_NOT_SUPPORTED);
+		gf_service_connect_ack(read->service, NULL, GF_NOT_SUPPORTED);
 	} else {
 		/*start our download (threaded)*/
 		gf_dm_sess_process(read->dnload);
@@ -204,7 +213,7 @@ GF_Err DC_ConnectService(GF_InputService *plug, GF_ClientService *serv, const ch
 
 	if (!read || !serv || !url) return GF_BAD_PARAM;
 
-	if (read->dnload) gf_term_download_del(read->dnload);
+	if (read->dnload) gf_service_download_del(read->dnload);
 	read->dnload = NULL;
 
 	read->url = gf_strdup(url);
@@ -227,23 +236,32 @@ GF_Err DC_ConnectService(GF_InputService *plug, GF_ClientService *serv, const ch
 	}
 	read->service = serv;
 
+	if (!strnicmp(url, "views://", 8) || !strnicmp(url, "mosaic://", 9)) {
+		read->is_views_url = GF_TRUE;
+		gf_service_connect_ack(serv, NULL, GF_OK);
+		read->is_service_connected = GF_TRUE;
+		return GF_OK;
+	}
+
 	if (ext) {
 		char *cgi_par = NULL;
 		ext += 1;
 		if (ext) {
-			tmp = strchr(ext, '#'); if (tmp) tmp[0] = 0;
+			tmp = strchr(ext, '#');
+			if (tmp) tmp[0] = 0;
 			/* Warning the '?' sign should not be present in local files but it is convenient to have it
 			   to test web content locally */
-			cgi_par = strchr(ext, '?'); if (cgi_par) cgi_par[0] = 0;
+			cgi_par = strchr(ext, '?');
+			if (cgi_par) cgi_par[0] = 0;
 		}
 		if (!stricmp(ext, "bt") || !stricmp(ext, "btz") || !stricmp(ext, "bt.gz")
-			|| !stricmp(ext, "xmta")
-			|| !stricmp(ext, "xmt") || !stricmp(ext, "xmt.gz") || !stricmp(ext, "xmtz")
-			|| !stricmp(ext, "wrl") || !stricmp(ext, "wrl.gz")
-			|| !stricmp(ext, "x3d") || !stricmp(ext, "x3d.gz") || !stricmp(ext, "x3dz")
-			|| !stricmp(ext, "x3dv") || !stricmp(ext, "x3dv.gz") || !stricmp(ext, "x3dvz")
-			|| !stricmp(ext, "swf")
-			)
+		        || !stricmp(ext, "xmta")
+		        || !stricmp(ext, "xmt") || !stricmp(ext, "xmt.gz") || !stricmp(ext, "xmtz")
+		        || !stricmp(ext, "wrl") || !stricmp(ext, "wrl.gz")
+		        || !stricmp(ext, "x3d") || !stricmp(ext, "x3d.gz") || !stricmp(ext, "x3dz")
+		        || !stricmp(ext, "x3dv") || !stricmp(ext, "x3dv.gz") || !stricmp(ext, "x3dvz")
+		        || !stricmp(ext, "swf")
+		   )
 			read->oti = GPAC_OTI_PRIVATE_SCENE_GENERIC;
 
 		else if (!stricmp(ext, "svg") || !stricmp(ext, "svgz") || !stricmp(ext, "svg.gz")) {
@@ -275,22 +293,21 @@ GF_Err DC_ConnectService(GF_InputService *plug, GF_ClientService *serv, const ch
 
 	/*remote fetch*/
 	if (!strnicmp(url, "file://", 7)) {
-		url += 7;
 	}
 	else if (strstr(url, "://")) {
 		DC_DownloadFile(plug, read->url);
 		return GF_OK;
 	}
 
-	test = gf_f64_open(read->url, "rt");
+	test = gf_fopen(read->url, "rt");
 	if (!test) {
-		gf_term_on_connect(serv, NULL, GF_URL_ERROR);
+		gf_service_connect_ack(serv, NULL, GF_URL_ERROR);
 		return GF_OK;
 	}
-	fclose(test);
+	gf_fclose(test);
 	if (!read->is_service_connected) {
-		gf_term_on_connect(serv, NULL, GF_OK);
-		read->is_service_connected = 1;
+		gf_service_connect_ack(serv, NULL, GF_OK);
+		read->is_service_connected = GF_TRUE;
 	}
 	return GF_OK;
 }
@@ -298,9 +315,9 @@ GF_Err DC_ConnectService(GF_InputService *plug, GF_ClientService *serv, const ch
 GF_Err DC_CloseService(GF_InputService *plug)
 {
 	DCReader *read = (DCReader *) plug->priv;
-	if (read->dnload) gf_term_download_del(read->dnload);
+	if (read->dnload) gf_service_download_del(read->dnload);
 	read->dnload = NULL;
-	gf_term_on_disconnect(read->service, NULL, GF_OK);
+	gf_service_disconnect_ack(read->service, NULL, GF_OK);
 	return GF_OK;
 }
 
@@ -320,6 +337,11 @@ static GF_Descriptor *DC_GetServiceDesc(GF_InputService *plug, u32 expect_type, 
 	iod->visual_profileAndLevel = 0xFE;
 	iod->objectDescriptorID = 1;
 
+	if (read->is_views_url) {
+		iod->URLString = gf_strdup(read->url);
+		return (GF_Descriptor *)iod;
+	}
+
 	esd = gf_odf_desc_esd_new(0);
 	esd->slConfig->timestampResolution = 1000;
 	esd->slConfig->useTimestampsFlag = 1;
@@ -330,15 +352,15 @@ static GF_Descriptor *DC_GetServiceDesc(GF_InputService *plug, u32 expect_type, 
 		uri = (char *) gf_dm_sess_get_cache_name(read->dnload);
 		gf_dm_sess_get_stats(read->dnload, NULL, NULL, &size, NULL, NULL, NULL);
 	} else {
-		FILE *f = gf_f64_open(read->url, "rt");
-		gf_f64_seek(f, 0, SEEK_END);
-		size = (u32) gf_f64_tell(f);
-		fclose(f);
+		FILE *f = gf_fopen(read->url, "rt");
+		gf_fseek(f, 0, SEEK_END);
+		size = (u32) gf_ftell(f);
+		gf_fclose(f);
 		uri = read->url;
 	}
 	bs = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
 	gf_bs_write_u32(bs, size);
-	gf_bs_write_data(bs, uri, strlen(uri));
+	gf_bs_write_data(bs, uri, (u32) strlen(uri));
 	gf_bs_get_content(bs, &esd->decoderConfig->decoderSpecificInfo->data, &esd->decoderConfig->decoderSpecificInfo->dataLength);
 	gf_bs_del(bs);
 
@@ -358,10 +380,13 @@ GF_Err DC_ServiceCommand(GF_InputService *plug, GF_NetworkCommand *com)
 	if (!dc) return GF_STREAM_NOT_FOUND;
 
 	switch (com->command_type) {
-	case GF_NET_CHAN_SET_PULL: return GF_OK;
-	case GF_NET_CHAN_INTERACTIVE: return GF_OK;
+	case GF_NET_CHAN_SET_PULL:
+		return GF_OK;
+	case GF_NET_CHAN_INTERACTIVE:
+		return GF_OK;
 	/*since data is file-based, no padding is needed (decoder plugin will handle it itself)*/
-	case GF_NET_CHAN_SET_PADDING: return GF_OK;
+	case GF_NET_CHAN_SET_PADDING:
+		return GF_OK;
 	case GF_NET_CHAN_BUFFER:
 		com->buffer.max = com->buffer.min = 0;
 		return GF_OK;
@@ -375,11 +400,14 @@ GF_Err DC_ServiceCommand(GF_InputService *plug, GF_NetworkCommand *com)
 		return GF_OK;
 	case GF_NET_CHAN_STOP:
 		return GF_OK;
-	case GF_NET_CHAN_CONFIG: return GF_OK;
+	case GF_NET_CHAN_CONFIG:
+		return GF_OK;
 	case GF_NET_CHAN_GET_DSI:
 		com->get_dsi.dsi = NULL;
 		com->get_dsi.dsi_len = 0;
 		return GF_OK;
+	default:
+		break;
 	}
 	return GF_OK;
 }
@@ -391,14 +419,15 @@ GF_Err DC_ConnectChannel(GF_InputService *plug, LPNETCHANNEL channel, const char
 
 	sscanf(url, "ES_ID=%ud", &ESID);
 	if (!ESID) {
-		gf_term_on_connect(read->service, channel, GF_STREAM_NOT_FOUND);
+		gf_service_connect_ack(read->service, channel, GF_STREAM_NOT_FOUND);
 	} else {
 		DummyChannel *dc;
 		GF_SAFEALLOC(dc, DummyChannel);
+		if (!dc) return GF_OUT_OF_MEM;
 		dc->ch = channel;
 		dc->ESID = ESID;
 		gf_list_add(read->channels, dc);
-		gf_term_on_connect(read->service, channel, GF_OK);
+		gf_service_connect_ack(read->service, channel, GF_OK);
 	}
 	return GF_OK;
 }
@@ -409,7 +438,7 @@ GF_Err DC_DisconnectChannel(GF_InputService *plug, LPNETCHANNEL channel)
 	DCReader *read = (DCReader *) plug->priv;
 
 	had_ch = DC_RemoveChannel(read, channel);
-	gf_term_on_disconnect(read->service, channel, had_ch ? GF_OK : GF_STREAM_NOT_FOUND);
+	gf_service_disconnect_ack(read->service, channel, had_ch ? GF_OK : GF_STREAM_NOT_FOUND);
 	return GF_OK;
 }
 
@@ -424,9 +453,9 @@ GF_Err DC_ChannelGetSLP(GF_InputService *plug, LPNETCHANNEL channel, char **out_
 	out_sl_hdr->compositionTimeStampFlag = 1;
 	out_sl_hdr->compositionTimeStamp = dc->start;
 	out_sl_hdr->accessUnitStartFlag = 1;
-	*sl_compressed = 0;
+	*sl_compressed = GF_FALSE;
 	*out_reception_status = GF_OK;
-	*is_new_data = 1;
+	*is_new_data = GF_TRUE;
 	return GF_OK;
 }
 
@@ -437,10 +466,10 @@ GF_Err DC_ChannelReleaseSLP(GF_InputService *plug, LPNETCHANNEL channel)
 
 Bool DC_CanHandleURLInService(GF_InputService *plug, const char *url)
 {
-	return 0;
+	return GF_FALSE;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
@@ -450,7 +479,7 @@ const u32 *QueryInterfaces()
 	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	DCReader *read;
@@ -458,8 +487,17 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	if (InterfaceType != GF_NET_CLIENT_INTERFACE) return NULL;
 
 	GF_SAFEALLOC(plug, GF_InputService);
-	memset(plug, 0, sizeof(GF_InputService));
+	if (!plug) return NULL;
+	GF_SAFEALLOC(read, DCReader);
+	if (!read) {
+		gf_free(plug);
+		return NULL;
+	}
+	read->channels = gf_list_new();
+	plug->priv = read;
+
 	GF_REGISTER_MODULE_INTERFACE(plug, GF_NET_CLIENT_INTERFACE, "GPAC Dummy Loader", "gpac distribution")
+
 
 	plug->RegisterMimeTypes = DC_RegisterMimeTypes;
 	plug->CanHandleURL = DC_CanHandleURL;
@@ -472,13 +510,11 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	plug->CanHandleURLInService = DC_CanHandleURLInService;
 	plug->ChannelGetSLP = DC_ChannelGetSLP;
 	plug->ChannelReleaseSLP = DC_ChannelReleaseSLP;
-	GF_SAFEALLOC(read, DCReader);
-	read->channels = gf_list_new();
-	plug->priv = read;
+
 	return (GF_BaseInterface *)plug;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *bi)
 {
 	GF_InputService *ifcn = (GF_InputService*)bi;
@@ -491,3 +527,5 @@ void ShutdownInterface(GF_BaseInterface *bi)
 		gf_free(bi);
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( dummy_in )

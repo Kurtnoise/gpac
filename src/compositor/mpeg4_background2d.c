@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -67,6 +67,10 @@ static void b2D_new_status(Background2DStack *bck, M_Background2D*back)
 	BackgroundStatus *status;
 
 	GF_SAFEALLOC(status, BackgroundStatus);
+	if (!status) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate background2D status\n"));
+		return;
+	}
 	gf_mx2d_init(status->ctx.transform);
 	status->ctx.drawable = bck->drawable;
 	status->ctx.flags = CTX_IS_BACKGROUND;
@@ -102,6 +106,10 @@ static Bool back_use_texture(M_Background2D *bck)
 
 static void DrawBackground2D_2D(DrawableContext *ctx, GF_TraverseState *tr_state)
 {
+	Bool clear_all = GF_TRUE;
+	u32 color;
+	Bool use_texture;
+	Bool is_offscreen = GF_FALSE;
 	Background2DStack *stack;
 	if (!ctx || !ctx->drawable || !ctx->drawable->node) return;
 	stack = (Background2DStack *) gf_node_get_private(ctx->drawable->node);
@@ -109,44 +117,91 @@ static void DrawBackground2D_2D(DrawableContext *ctx, GF_TraverseState *tr_state
 	if (!ctx->bi->clip.width || !ctx->bi->clip.height) return;
 
 	stack->flags &= ~CTX_PATH_FILLED;
+	color = ctx->aspect.fill_color;
 
-	if (back_use_texture((M_Background2D *)ctx->drawable->node)) {
+	use_texture = back_use_texture((M_Background2D *)ctx->drawable->node);
+	if (!use_texture && !tr_state->visual->is_attached) {
+		use_texture = 1;
+		stack->txh.data = stack->col_tx;
+		stack->txh.width = 2;
+		stack->txh.height = 2;
+		stack->txh.stride = 6;
+		stack->txh.pixelformat = GF_PIXEL_RGB_24;
+	}
 
-		if (!tr_state->visual->DrawBitmap(tr_state->visual, tr_state, ctx, NULL)) {
+	if (use_texture) {
+
+		if (!tr_state->visual->DrawBitmap(tr_state->visual, tr_state, ctx)) {
 			/*set target rect*/
 			gf_path_reset(stack->drawable->path);
-			gf_path_add_rect_center(stack->drawable->path, 
-								ctx->bi->unclip.x + ctx->bi->unclip.width/2,
-								ctx->bi->unclip.y - ctx->bi->unclip.height/2,
-								ctx->bi->unclip.width, ctx->bi->unclip.height);
+			gf_path_add_rect_center(stack->drawable->path,
+			                        ctx->bi->unclip.x + ctx->bi->unclip.width/2,
+			                        ctx->bi->unclip.y - ctx->bi->unclip.height/2,
+			                        ctx->bi->unclip.width, ctx->bi->unclip.height);
 
 			/*draw texture*/
 			visual_2d_texture_path(tr_state->visual, stack->drawable->path, ctx, tr_state);
 		}
-		stack->flags &= ~(CTX_APP_DIRTY | CTX_TEXTURE_DIRTY);
-	} else {
-		
-		/*direct drawing, draw without clippers */
-		if (tr_state->immediate_draw) {
-			/*directly clear with specified color*/
-			tr_state->visual->ClearSurface(tr_state->visual, &ctx->bi->clip, ctx->aspect.fill_color);
-		} else {
-			u32 i;
-			GF_IRect clip;
-			for (i=0; i<tr_state->visual->to_redraw.count; i++) {
-				/*there's an opaque region above, don't draw*/
-#ifdef TRACK_OPAQUE_REGIONS
-				if (tr_state->visual->draw_node_index<tr_state->visual->to_redraw.opaque_node_index[i]) continue;
+		//a quick hack, if texture not ready return (we don't have direct notification of this through the above functions
+#ifndef GPAC_DISABLE_3D
+		if (tr_state->visual->compositor->hybrid_opengl && !stack->txh.tx_io)
+			return;
 #endif
-				clip = ctx->bi->clip;
-				gf_irect_intersect(&clip, &tr_state->visual->to_redraw.list[i]);
-				if (clip.width && clip.height) {
-					tr_state->visual->ClearSurface(tr_state->visual, &clip, ctx->aspect.fill_color);
-				}
+
+		stack->flags &= ~(CTX_APP_DIRTY | CTX_TEXTURE_DIRTY);
+		tr_state->visual->has_modif = 1;
+#ifndef GPAC_DISABLE_3D
+		//in opengl auto mode we still have to clear the canvas
+		if (!tr_state->immediate_draw && !tr_state->visual->offscreen && tr_state->visual->compositor->hybrid_opengl) {
+			clear_all = GF_FALSE;
+			is_offscreen = GF_TRUE;
+			color &= 0x00FFFFFF;
+		} else
+#endif
+			return;
+	}
+
+
+#ifndef GPAC_DISABLE_3D
+	if (ctx->flags & CTX_BACKROUND_NOT_LAYER) {
+		if (clear_all && !tr_state->visual->offscreen && tr_state->visual->compositor->hybrid_opengl) {
+			compositor_2d_hybgl_clear_surface(tr_state->visual, NULL, color, GF_FALSE);
+			is_offscreen = GF_TRUE;
+			color &= 0x00FFFFFF;
+			//we may need to clear the canvas for immediate mode
+		}
+	} else {
+		is_offscreen = GF_TRUE;
+	}
+	if (ctx->flags & CTX_BACKROUND_NO_CLEAR) {
+		stack->flags &= ~(CTX_APP_DIRTY | CTX_TEXTURE_DIRTY);
+		tr_state->visual->has_modif = 1;
+		return;
+	}
+#endif
+
+	/*direct drawing, draw without clippers */
+	if (tr_state->immediate_draw
+	   ) {
+		/*directly clear with specified color*/
+		if (clear_all)
+			tr_state->visual->ClearSurface(tr_state->visual, &ctx->bi->clip, color, is_offscreen);
+	} else {
+		u32 i;
+		GF_IRect clip;
+		for (i=0; i<tr_state->visual->to_redraw.count; i++) {
+			/*there's an opaque region above, don't draw*/
+#ifdef TRACK_OPAQUE_REGIONS
+			if (tr_state->visual->draw_node_index < tr_state->visual->to_redraw.list[i].opaque_node_index) continue;
+#endif
+			clip = ctx->bi->clip;
+			gf_irect_intersect(&clip, &tr_state->visual->to_redraw.list[i].rect);
+			if (clip.width && clip.height) {
+				tr_state->visual->ClearSurface(tr_state->visual, &clip, color, is_offscreen ? 2 : 0);
 			}
 		}
-		stack->flags &= ~(CTX_APP_DIRTY | CTX_TEXTURE_DIRTY);
 	}
+	stack->flags &= ~(CTX_APP_DIRTY | CTX_TEXTURE_DIRTY);
 	tr_state->visual->has_modif = 1;
 }
 
@@ -167,32 +222,27 @@ static Bool back_texture_enabled(M_Background2D *bck, GF_TextureHandler *txh)
 
 static void DrawBackground2D_3D(M_Background2D *bck, Background2DStack *st, GF_TraverseState *tr_state)
 {
-	GF_Matrix mx;
+	GF_Matrix mx, bck_mx, bck_mx_cam;
 	Bool use_texture;
 
 	use_texture = back_texture_enabled(bck, &st->txh);
 
 	visual_3d_set_background_state(tr_state->visual, 1);
 
-	visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_MODELVIEW);
-	visual_3d_matrix_push(tr_state->visual);
-
-/*	visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_TEXTURE);
-	gf_sc_texture_get_transform(&st->txh, NULL, &mx, 0);
-	visual_3d_matrix_load(tr_state->visual, mx.m);
-*/	
+	gf_mx_copy(bck_mx_cam, tr_state->camera->modelview);
+	gf_mx_copy(bck_mx, tr_state->model_matrix);
 
 	/*little opt: if we clear the main visual clear it entirely */
 	if (! tr_state->is_layer) {
 		visual_3d_clear(tr_state->visual, bck->backColor, FIX_ONE);
 		if (!use_texture) {
-			visual_3d_matrix_pop(tr_state->visual);
 			visual_3d_set_background_state(tr_state->visual, 0);
 			return;
 		}
 		/*we need a hack here because main vp is always traversed before main background, and in the case of a
 		2D viewport it modifies the modelview matrix, which we don't want ...*/
-		visual_3d_matrix_reset(tr_state->visual);
+		gf_mx_init(tr_state->model_matrix);
+		gf_mx_init(tr_state->camera->modelview);
 	}
 	if (!use_texture || (!tr_state->is_layer && st->txh.transparent) ) visual_3d_set_material_2d(tr_state->visual, bck->backColor, FIX_ONE);
 	if (use_texture) {
@@ -208,7 +258,8 @@ static void DrawBackground2D_3D(M_Background2D *bck, Background2DStack *st, GF_T
 		mesh_set_vertex(st->mesh,  B2D_PLANE_HSIZE, -B2D_PLANE_HSIZE, 0,  0,  0,  FIX_ONE, FIX_ONE, 0);
 		mesh_set_vertex(st->mesh,  B2D_PLANE_HSIZE,  B2D_PLANE_HSIZE, 0,  0,  0,  FIX_ONE, FIX_ONE, FIX_ONE);
 		mesh_set_vertex(st->mesh, -B2D_PLANE_HSIZE,  B2D_PLANE_HSIZE, 0,  0,  0,  FIX_ONE, 0, FIX_ONE);
-		mesh_set_triangle(st->mesh, 0, 1, 2); mesh_set_triangle(st->mesh, 0, 2, 3);
+		mesh_set_triangle(st->mesh, 0, 1, 2);
+		mesh_set_triangle(st->mesh, 0, 2, 3);
 		st->mesh->flags |= MESH_IS_2D;
 	}
 
@@ -216,7 +267,7 @@ static void DrawBackground2D_3D(M_Background2D *bck, Background2DStack *st, GF_T
 	if (tr_state->camera->is_3D) {
 		Fixed sx, sy;
 		/*reset matrix*/
-		visual_3d_matrix_reset(tr_state->visual);
+		gf_mx_init(tr_state->model_matrix);
 		sx = sy = 2 * gf_mulfix(gf_tan(tr_state->camera->fieldOfView/2), tr_state->camera->z_far);
 		if (tr_state->camera->width > tr_state->camera->height) {
 			sx = gf_muldiv(sx, tr_state->camera->width, tr_state->camera->height);
@@ -230,9 +281,9 @@ static void DrawBackground2D_3D(M_Background2D *bck, Background2DStack *st, GF_T
 		gf_mx_add_translation(&mx, 0, 0, -0.995f*tr_state->camera->z_far);
 #endif
 	} else {
-		gf_mx_add_scale(&mx, tr_state->bbox.max_edge.x - tr_state->bbox.min_edge.x, 
-							tr_state->bbox.max_edge.y - tr_state->bbox.min_edge.y,
-							FIX_ONE);
+		gf_mx_add_scale(&mx, tr_state->bbox.max_edge.x - tr_state->bbox.min_edge.x,
+		                tr_state->bbox.max_edge.y - tr_state->bbox.min_edge.y,
+		                FIX_ONE);
 		/*when in layer2D, DON'T MOVE BACKGROUND TO ZFAR*/
 		if (!tr_state->is_layer) {
 			Fixed tr;
@@ -245,14 +296,16 @@ static void DrawBackground2D_3D(M_Background2D *bck, Background2DStack *st, GF_T
 			gf_mx_add_translation(&mx, 0, 0, tr);
 		}
 	}
-	visual_3d_matrix_add(tr_state->visual, mx.m);
+	gf_mx_add_matrix(&tr_state->model_matrix, &mx);
 	visual_3d_mesh_paint(tr_state, st->mesh);
 	if (tr_state->mesh_num_textures) {
 		gf_sc_texture_disable(&st->txh);
 		tr_state->mesh_num_textures = 0;
 	}
 
-	visual_3d_matrix_pop(tr_state->visual);
+	gf_mx_copy(tr_state->model_matrix, bck_mx);
+	gf_mx_copy(tr_state->camera->modelview, bck_mx_cam);
+
 	visual_3d_set_background_state(tr_state->visual, 0);
 }
 #endif
@@ -272,7 +325,7 @@ static void TraverseBackground2D(GF_Node *node, void *rs, Bool is_destroy)
 
 	bck = (M_Background2D *)node;
 
-	/*special case for background in Layer2D: the background is seen as a regular drawable, so 
+	/*special case for background in Layer2D: the background is seen as a regular drawable, so
 	RENDER_BINDABLE is not used*/
 	switch (tr_state->traversing_mode) {
 	case TRAVERSE_DRAW_2D:
@@ -313,6 +366,8 @@ static void TraverseBackground2D(GF_Node *node, void *rs, Bool is_destroy)
 	if (!status) return;
 
 	if (gf_node_dirty_get(node)) {
+		u32 i;
+
 		stack->flags |= CTX_APP_DIRTY;
 		gf_node_dirty_clear(node, 0);
 
@@ -322,13 +377,31 @@ static void TraverseBackground2D(GF_Node *node, void *rs, Bool is_destroy)
 			status->ctx.aspect.fill_color = col;
 			stack->flags |= CTX_APP_DIRTY;
 		}
-	} 
+		for (i=0; i<4; i++) {
+			stack->col_tx[3*i] = FIX2INT(255 * bck->backColor.red);
+			stack->col_tx[3*i+1] = FIX2INT(255 * bck->backColor.green);
+			stack->col_tx[3*i+2] = FIX2INT(255 * bck->backColor.blue);
+		}
+	}
 
 	if (back_use_texture(bck) ) {
-		if (stack->txh.tx_io && !(status->ctx.flags & CTX_APP_DIRTY) && stack->txh.needs_refresh) 
+#ifndef GPAC_DISABLE_3D
+		if (stack->txh.compositor->hybrid_opengl && !tr_state->visual->offscreen && stack->hybgl_init) {
+			stack->flags |= CTX_HYBOGL_NO_CLEAR;
+		}
+		stack->hybgl_init = 1;
+#endif
+		if (stack->txh.tx_io && !(status->ctx.flags & CTX_APP_DIRTY) && stack->txh.needs_refresh) {
 			stack->flags |= CTX_TEXTURE_DIRTY;
+		}
 	}
-	status->ctx.flags = stack->flags;
+	if (status->ctx.flags & CTX_BACKROUND_NOT_LAYER) {
+		status->ctx.flags = stack->flags | CTX_BACKROUND_NOT_LAYER;
+	} else {
+		status->ctx.flags = stack->flags;
+		if (tr_state->is_layer)
+			status->ctx.flags &= ~CTX_BACKROUND_NOT_LAYER;
+	}
 
 
 	if (tr_state->traversing_mode != TRAVERSE_BINDABLE) return;
@@ -372,7 +445,7 @@ static void UpdateBackgroundTexture(GF_TextureHandler *txh)
 {
 	gf_sc_texture_update_frame(txh, 0);
 	/*restart texture if needed (movie background controled by MediaControl)*/
-	if (txh->stream_finished && gf_mo_get_loop(txh->stream, 0)) 
+	if (txh->stream_finished && gf_mo_get_loop(txh->stream, 0))
 		gf_sc_texture_restart(txh);
 }
 
@@ -380,6 +453,10 @@ void compositor_init_background2d(GF_Compositor *compositor, GF_Node *node)
 {
 	Background2DStack *ptr;
 	GF_SAFEALLOC(ptr, Background2DStack);
+	if (!ptr) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate background2D stack\n"));
+		return;
+	}
 
 	ptr->status_stack = gf_list_new();
 	ptr->reg_stacks = gf_list_new();
@@ -415,7 +492,7 @@ void compositor_background2d_modified(GF_Node *node)
 		return;
 	}
 	/*if not open and changed play*/
-	if (bck->url.count) 
+	if (bck->url.count)
 		gf_sc_texture_play(&st->txh, &bck->url);
 	gf_sc_invalidate(st->txh.compositor, NULL);
 }
@@ -425,7 +502,7 @@ Bool compositor_background_transparent(GF_Node *node)
 	if (node && (gf_node_get_tag(node) == TAG_MPEG4_Background2D)) {
 		Background2DStack *st;
 		if (!((M_Background2D *)node)->isBound) return 1;
-			
+
 		st = (Background2DStack *) gf_node_get_private(node);
 		if (st->txh.transparent) return 1;
 		return 0;

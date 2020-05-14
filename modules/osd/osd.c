@@ -1,25 +1,25 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2011-2012
  *			All rights reserved
  *
- *  This file is part of GPAC / User Event Recorder sub-project
+ *  This file is part of GPAC / Sampe On-Scvreen Display sub-project
  *
  *  GPAC is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -46,6 +46,7 @@ typedef struct
 	GF_SystemRTInfo rti;
 } GF_OSD;
 
+#if 0
 static GFINLINE GF_Node *create_node(GF_OSD *osd, u32 tag, GF_Node *par)
 {
 	GF_Node *n = gf_node_new(osd->odm->subscene->graph, tag);
@@ -58,6 +59,8 @@ static GFINLINE GF_Node *create_node(GF_OSD *osd, u32 tag, GF_Node *par)
 	}
 	return n;
 }
+#endif
+
 const char *osd_scene_graph = "\
 EXTERNPROTO Untransform [\
     exposedField MFNode children []\
@@ -124,7 +127,7 @@ void osd_on_resize(GF_Node *hdl, GF_DOM_Event *event, GF_Node *observer)
 		gf_node_dirty_set((GF_Node *) osd->ct2d, GF_SG_NODE_DIRTY, 1);
 
 		if (osd->transform) {
-			osd->transform->translation.y = INT2FIX( (event->screen_rect.height - osd->ct2d->pixelHeight) ) / 2;
+			osd->transform->translation.y = INT2FIX( (FIX2INT(event->screen_rect.height) - osd->ct2d->pixelHeight) / 2 ) ;
 			gf_node_dirty_set((GF_Node *) osd->transform, GF_SG_NODE_DIRTY, 1);
 		}
 	}
@@ -152,7 +155,7 @@ Bool osd_load_scene(GF_OSD *osd)
 	gf_list_del(nodes);
 
 	if (!n) return 0;
-	
+
 	gf_sg_set_root_node(osd->odm->subscene->graph, n);
 	gf_sg_set_scene_size_info(osd->odm->subscene->graph, 0, 0, 1);
 
@@ -210,7 +213,7 @@ static Bool osd_process(GF_TermExt *termext, u32 action, void *param)
 	case GF_TERM_EXT_START:
 		osd->term = (GF_Terminal *) param;
 		opt = gf_modules_get_option((GF_BaseInterface*)termext, "OSD", "Enabled");
-		if (opt && strcmp(opt, "yes")) return 0;
+		if (!opt || strcmp(opt, "yes")) return 0;
 
 		/*load scene*/
 		if (! osd_load_scene(osd)) return 0;
@@ -273,24 +276,24 @@ void osd_delete(GF_BaseInterface *ifce)
 	gf_free(dr);
 }
 
-GF_EXPORT
-const u32 *QueryInterfaces() 
+GPAC_MODULE_EXPORT
+const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
 		GF_TERM_EXT_INTERFACE,
 		0
 	};
-	return si; 
+	return si;
 }
 
-GF_EXPORT
-GF_BaseInterface *LoadInterface(u32 InterfaceType) 
+GPAC_MODULE_EXPORT
+GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	if (InterfaceType == GF_TERM_EXT_INTERFACE) return (GF_BaseInterface *)osd_new();
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -299,3 +302,5 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 		break;
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( osd )

@@ -24,14 +24,14 @@ OBJS=directfb_out.o directfb_wrapper.o
 
 SRCS := $(OBJS:.o=.c) 
 
-LIB=gm_directfb_out.$(DYN_LIB_SUFFIX)
+LIB=gm_directfb_out$(DYN_LIB_SUFFIX)
 
 
 all: $(LIB)
 
 
 $(LIB): $(OBJS)
-	$(CC) $(SHFLAGS) -o ../../bin/gcc/$@ $(OBJS) $(LDFLAGS) -L../../bin/gcc -lgpac
+	$(CC) $(SHFLAGS) -o ../../bin/gcc/$@ $(OBJS) -L../../bin/gcc -lgpac $(LDFLAGS)
 
 clean: 
 	rm -f $(OBJS) ../../bin/gcc/$(LIB)
@@ -45,10 +45,4 @@ depend:
 distclean: clean
 	rm -f Makefile.bak .depend
 
-
-
-# include dependency files if they exist
-#
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+-include .depend

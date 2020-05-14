@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -51,19 +51,33 @@ void apply_feComponentTransfer(GF_Node *node, GF_TextureHandler *source, GF_Rect
 		Fixed amplitude = 1;
 		Fixed exponent = 1;
 		Fixed offset = 0;
-		u8 *ptr = NULL;
+		char *ptr = NULL;
 		/*FIXME: unused u32 tag = gf_node_get_tag(l->node);*/
 		GF_DOMAttribute *att = ((SVG_Element *)l->node)->attributes;
-		
+
 		while (att) {
 			switch (att->tag) {
-			case TAG_SVG_ATT_filter_transfer_type: type = *(u8*)att->data;  break;
-			case TAG_SVG_ATT_filter_table_values: table = *(GF_List **)att->data;  break;
-			case TAG_SVG_ATT_slope: slope = ((SVG_Number *)att->data)->value; break;
-			case TAG_SVG_ATT_filter_intercept: intercept = ((SVG_Number *)att->data)->value; break;
-			case TAG_SVG_ATT_filter_amplitude: amplitude = ((SVG_Number *)att->data)->value; break;
-			case TAG_SVG_ATT_filter_exponent: exponent = ((SVG_Number *)att->data)->value; break;
-			case TAG_SVG_ATT_offset: offset = ((SVG_Number *)att->data)->value; break;
+			case TAG_SVG_ATT_filter_transfer_type:
+				type = *(u8*)att->data;
+				break;
+			case TAG_SVG_ATT_filter_table_values:
+				table = *(GF_List **)att->data;
+				break;
+			case TAG_SVG_ATT_slope:
+				slope = ((SVG_Number *)att->data)->value;
+				break;
+			case TAG_SVG_ATT_filter_intercept:
+				intercept = ((SVG_Number *)att->data)->value;
+				break;
+			case TAG_SVG_ATT_filter_amplitude:
+				amplitude = ((SVG_Number *)att->data)->value;
+				break;
+			case TAG_SVG_ATT_filter_exponent:
+				exponent = ((SVG_Number *)att->data)->value;
+				break;
+			case TAG_SVG_ATT_offset:
+				offset = ((SVG_Number *)att->data)->value;
+				break;
 			}
 			att = att->next;
 		}
@@ -233,20 +247,20 @@ void svg_draw_filter(GF_Node *filter, GF_Node *node, GF_TraverseState *tr_state)
 		st->data = (u8*)gf_realloc(st->data, sizeof(u8) * st->alloc_size);
 	}
 	memset(st->data, 0x0, sizeof(char) * st->txh.stride * st->txh.height);
-	st->txh.data = st->data;
+	st->txh.data = (char *) st->data;
 	/*setup geometry (rectangle matching the bounds of the object)
 	Warning, we want to center the cached bitmap at the center of the screen (main visual)*/
 	gf_path_reset(st->drawable->path);
 
-	gf_path_add_rect_center(st->drawable->path, 
-		bounds.x + bounds.width/2, 
-		bounds.y - bounds.height/2, 
-		bounds.width, 
-		bounds.height);
+	gf_path_add_rect_center(st->drawable->path,
+	                        bounds.x + bounds.width/2,
+	                        bounds.y - bounds.height/2,
+	                        bounds.width,
+	                        bounds.height);
 
 
 	old_surf = tr_state->visual->raster_surface;
-	offscreen_surface = tr_state->visual->compositor->rasterizer->surface_new(tr_state->visual->compositor->rasterizer, tr_state->visual->center_coords);	
+	offscreen_surface = tr_state->visual->compositor->rasterizer->surface_new(tr_state->visual->compositor->rasterizer, tr_state->visual->center_coords);
 	tr_state->visual->raster_surface = offscreen_surface;
 
 	gf_mx2d_copy(backup, tr_state->transform);
@@ -254,11 +268,11 @@ void svg_draw_filter(GF_Node *filter, GF_Node *node, GF_TraverseState *tr_state)
 
 	/*attach the buffer to visual*/
 	tr_state->visual->compositor->rasterizer->surface_attach_to_buffer(offscreen_surface, st->txh.data,
-									st->txh.width, 
-									st->txh.height,
-									0, 
-									st->txh.stride, 
-									st->txh.pixelformat);
+	        st->txh.width,
+	        st->txh.height,
+	        0,
+	        st->txh.stride,
+	        st->txh.pixelformat);
 
 	prev_flags = tr_state->immediate_draw;
 	tr_state->immediate_draw = 1;
@@ -282,7 +296,7 @@ void svg_draw_filter(GF_Node *filter, GF_Node *node, GF_TraverseState *tr_state)
 		temp_x = -rc.x;
 		temp_y = rc.height - rc.y;
 	}
-	gf_mx2d_add_translation(&tr_state->transform, temp_x, temp_y);		
+	gf_mx2d_add_translation(&tr_state->transform, temp_x, temp_y);
 
 
 	rc1 = tr_state->visual->surf_rect;
@@ -310,9 +324,9 @@ void svg_draw_filter(GF_Node *filter, GF_Node *node, GF_TraverseState *tr_state)
 	child_ctx = ctx->next;
 	while (child_ctx && child_ctx->drawable) {
 		drawable_reset_bounds(child_ctx->drawable, tr_state->visual);
-		child_ctx->drawable = NULL;	
+		child_ctx->drawable = NULL;
 		child_ctx = child_ctx->next;
-	}	
+	}
 	tr_state->visual->cur_context = ctx;
 
 
@@ -333,7 +347,7 @@ void svg_draw_filter(GF_Node *filter, GF_Node *node, GF_TraverseState *tr_state)
 	st->txh.flags |= GF_SR_TEXTURE_NO_GL_FLIP;
 	gf_sc_texture_set_data(&st->txh);
 #ifndef GPAC_DISABLE_3D
-	if (tr_state->visual->type_3d) 
+	if (tr_state->visual->type_3d)
 		gf_sc_texture_push_image(&st->txh, 0, 0);
 	else
 #endif
@@ -361,8 +375,8 @@ void svg_draw_filter(GF_Node *filter, GF_Node *node, GF_TraverseState *tr_state)
 	} else {
 		bounds.x = all_atts.x ? all_atts.x->value : 0;
 		bounds.y = all_atts.y ? all_atts.y->value : 0;
-		bounds.width = all_atts.width ? all_atts.x->value : bounds.width;
-		bounds.height = all_atts.x ? all_atts.x->value : 120;
+		bounds.width = all_atts.width ? all_atts.width->value : bounds.width;
+		bounds.height = all_atts.height ? all_atts.height->value : 120;
 	}
 	gf_mx2d_apply_rect(&backup, &bounds);
 
@@ -378,7 +392,7 @@ void svg_draw_filter(GF_Node *filter, GF_Node *node, GF_TraverseState *tr_state)
 		visual_3d_draw_from_context(tr_state->ctx, tr_state);
 		ctx->drawable = NULL;
 		return;
-	} 
+	}
 #endif
 
 	/*we computed the texture in final screen coordinate, so use the identity matrix for the context*/
@@ -402,7 +416,7 @@ static void svg_traverse_filter(GF_Node *node, void *rs, Bool is_destroy)
 	}
 
 	if (tr_state->traversing_mode==TRAVERSE_DRAW_2D) {
-		if (! tr_state->visual->DrawBitmap(tr_state->visual, tr_state, tr_state->ctx, NULL)) {
+		if (! tr_state->visual->DrawBitmap(tr_state->visual, tr_state, tr_state->ctx)) {
 			visual_2d_texture_path(tr_state->visual, st->drawable->path, tr_state->ctx, tr_state);
 		}
 	}
@@ -412,6 +426,10 @@ void compositor_init_svg_filter(GF_Compositor *compositor, GF_Node *node)
 {
 	GF_FilterStack *stack;
 	GF_SAFEALLOC(stack, GF_FilterStack);
+	if (!stack) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate svg filter stack\n"));
+		return;
+	}
 	gf_node_set_private(node, stack);
 	gf_node_set_callback_function(node, svg_traverse_filter);
 

@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,16 +11,16 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
- *		
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
  */
 
 #ifndef RTP_IN_H
@@ -91,8 +91,12 @@ typedef struct
 //	Bool handle_announce;
 
 	Double last_ntp;
-	
+
 	Bool session_migration;
+
+	Bool is_scalable;
+
+	u32 cur_mid;
 } RTPClient;
 
 enum
@@ -117,7 +121,7 @@ typedef struct _rtp_session
 	GF_RTSPSession *session;
 	/*session ID for aggregated stream control*/
 	char *session_id;
-	
+
 	/*session control string*/
 	char *control;
 
@@ -128,6 +132,10 @@ typedef struct _rtp_session
 	u32 command_time;
 	GF_List *rtsp_commands;
 	GF_Err connect_error;
+
+	/*SAT>IP uses a non-conformant version of RTSP*/
+	Bool satip;
+	char *satip_server;
 } RTSPSession;
 
 /*creates new RTSP session handler*/
@@ -140,6 +148,8 @@ RTSPSession *RP_CheckSession(RTPClient *rtp, char *control);
 void RP_SetupObjects(RTPClient *rtp);
 
 void RP_ProcessCommands(RTSPSession *sess);
+
+void RP_SendMessage(GF_ClientService *service, GF_Err e, const char *message);
 
 /*RTP channel state*/
 enum
@@ -175,7 +185,7 @@ enum
 	RTP_INTERLEAVED = (1<<2),
 	/*broadcast emultaion is on (no time control for stream)*/
 	RTP_FORCE_BROADCAST = (1<<3),
-	
+
 	/*RTP channel runtime flags*/
 
 	/*set if next command (PLAY/PAUSE) is to be skipped (aggregation control)*/
@@ -196,14 +206,16 @@ enum
 	RTP_SET_TIME_NONE = 0,
 	RTP_SET_TIME_RTP,
 	RTP_SET_TIME_RTP_SEEK,
- };
+};
+
+#define RTCP_DEFAULT_TIMEOUT_MS	5000
 
 /*rtp channel*/
 typedef struct
 {
 	/*module*/
 	RTPClient *owner;
-	
+
 	/*channel flags*/
 	u32 flags;
 
@@ -221,7 +233,7 @@ typedef struct
 	/*logical app channel*/
 	LPNETCHANNEL channel;
 	u32 status;
-	
+
 	u32 ES_ID, OD_ID;
 	char *control;
 
@@ -243,6 +255,21 @@ typedef struct
 	/*RTP stats*/
 	u32 rtp_bytes, rtcp_bytes, stat_start_time, stat_stop_time;
 	u32 ts_res;
+
+	/*stream id*/
+	u32 mid;
+
+	u32 prev_stream;
+	u32 next_stream;
+	u32 base_stream;
+
+	u32 rtcp_check_start;
+
+	u64 ts_offset;
+	
+	/*SAT>IP M2TS demux*/
+	GF_InputService *satip_m2ts_ifce;
+	Bool satip_m2ts_service_connected;
 } RTPStream;
 
 GF_Err RP_ConnectServiceEx(GF_InputService *plug, GF_ClientService *serv, const char *url, Bool skip_migration);
@@ -250,6 +277,8 @@ GF_Err RP_ConnectServiceEx(GF_InputService *plug, GF_ClientService *serv, const 
 
 /*creates new RTP stream from SDP info*/
 RTPStream *RP_NewStream(RTPClient *rtp, GF_SDPMedia *media, GF_SDPInfo *sdp, RTPStream *input_stream);
+/*creates new SAT>IP stream*/
+RTPStream *RP_NewSatipStream(RTPClient *rtp, const char *server_ip);
 /*destroys RTP stream */
 void RP_DeleteStream(RTPStream *ch);
 /*resets stream state and inits RTP sockets if ResetOnly is false*/
@@ -356,5 +385,3 @@ void RP_SaveSessionState(RTPClient *rtp);
 #endif /*GPAC_DISABLE_STREAMING*/
 
 #endif
-
-

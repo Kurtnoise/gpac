@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -97,35 +97,35 @@ static void l3d_CheckBindables(GF_Node *n, GF_TraverseState *tr_state, Bool forc
 
 	if (force_traverse) gf_node_traverse(l3d->background, tr_state);
 	btop = (GF_Node*)gf_list_get(tr_state->backgrounds, 0);
-	if (btop != l3d->background) { 
+	if (btop != l3d->background) {
 		gf_node_unregister(l3d->background, n);
-		gf_node_register(btop, n); 
+		gf_node_register(btop, n);
 		l3d->background = btop;
-		gf_node_event_out_str(n, "background");
+		gf_node_event_out(n, 4/*"background"*/);
 	}
 	if (force_traverse) gf_node_traverse(l3d->viewpoint, tr_state);
 	btop = (GF_Node*)gf_list_get(tr_state->viewpoints, 0);
-	if (btop != l3d->viewpoint) { 
+	if (btop != l3d->viewpoint) {
 		gf_node_unregister(l3d->viewpoint, n);
-		gf_node_register(btop, n); 
+		gf_node_register(btop, n);
 		l3d->viewpoint = btop;
-		gf_node_event_out_str(n, "viewpoint");
+		gf_node_event_out(n, 7/*"viewpoint"*/);
 	}
 	if (force_traverse) gf_node_traverse(l3d->navigationInfo, tr_state);
 	btop = (GF_Node*)gf_list_get(tr_state->navigations, 0);
-	if (btop != l3d->navigationInfo) { 
+	if (btop != l3d->navigationInfo) {
 		gf_node_unregister(l3d->navigationInfo, n);
-		gf_node_register(btop, n); 
+		gf_node_register(btop, n);
 		l3d->navigationInfo = btop;
-		gf_node_event_out_str(n, "navigationInfo");
+		gf_node_event_out(n, 6/*"navigationInfo"*/);
 	}
 	if (force_traverse) gf_node_traverse(l3d->fog, tr_state);
 	btop = (GF_Node*)gf_list_get(tr_state->fogs, 0);
-	if (btop != l3d->fog) { 
+	if (btop != l3d->fog) {
 		gf_node_unregister(l3d->fog, n);
-		gf_node_register(btop, n); 
+		gf_node_register(btop, n);
 		l3d->fog = btop;
-		gf_node_event_out_str(n, "fog");
+		gf_node_event_out(n, 5/*"fog"*/);
 	}
 	tr_state->traversing_mode = mode;
 }
@@ -147,12 +147,12 @@ u32 layer3d_setup_offscreen(GF_Node *node, Layer3DStack *st, GF_TraverseState *t
 	}
 #endif
 
-/*
-	if (tr_state->visual->compositor->recompute_ar) {
-		gf_node_dirty_set(node, 0, 0);
-		return 0;
-	}
-*/
+	/*
+		if (tr_state->visual->compositor->recompute_ar) {
+			gf_node_dirty_set(node, 0, 0);
+			return 0;
+		}
+	*/
 
 	new_pixel_format = GF_PIXEL_RGBA;
 #ifndef GPAC_USE_TINYGL
@@ -160,11 +160,11 @@ u32 layer3d_setup_offscreen(GF_Node *node, Layer3DStack *st, GF_TraverseState *t
 //		new_pixel_format = GF_PIXEL_RGB_24;
 
 	/*in OpenGL_ES, only RGBA can be safelly used with glReadPixels*/
-#ifdef GPAC_USE_OGL_ES
+#ifdef GPAC_USE_GLES1X
 	new_pixel_format = GF_PIXEL_RGBA;
 #else
 	/*no support for alpha in offscreen rendering*/
-	if (!(compositor->video_out->hw_caps & GF_VIDEO_HW_OPENGL_OFFSCREEN_ALPHA)) 
+	if (!(compositor->video_out->hw_caps & GF_VIDEO_HW_OPENGL_OFFSCREEN_ALPHA))
 		new_pixel_format = GF_PIXEL_RGB_24;
 #endif
 
@@ -174,7 +174,7 @@ u32 layer3d_setup_offscreen(GF_Node *node, Layer3DStack *st, GF_TraverseState *t
 #if defined(GF_SR_USE_DEPTH) && !defined(GPAC_DISABLE_3D)
 	if (st->visual->type_3d && (compositor->video_out->hw_caps & GF_VIDEO_HW_HAS_DEPTH) ) new_pixel_format = GF_PIXEL_RGBDS;
 #endif
-	
+
 	w = (u32) FIX2INT(gf_ceil(width));
 	h = (u32) FIX2INT(gf_ceil(height));
 
@@ -189,12 +189,12 @@ u32 layer3d_setup_offscreen(GF_Node *node, Layer3DStack *st, GF_TraverseState *t
 	if (!w || !h) return 0;
 
 	if (st->txh.tx_io
-		&& (new_pixel_format == st->txh.pixelformat)
-		&& (w == st->txh.width) 
-		&& (h == st->txh.height) 
-		&& (compositor->offscreen_width >= w) 
-		&& (compositor->offscreen_height >= h)
-	) 
+	        && (new_pixel_format == st->txh.pixelformat)
+	        && (w == st->txh.width)
+	        && (h == st->txh.height)
+	        && (compositor->offscreen_width >= w)
+	        && (compositor->offscreen_height >= h)
+	   )
 		return 2;
 
 	if (st->txh.tx_io) {
@@ -217,10 +217,10 @@ u32 layer3d_setup_offscreen(GF_Node *node, Layer3DStack *st, GF_TraverseState *t
 	if (new_pixel_format==GF_PIXEL_RGBA) {
 		st->txh.stride = w * 4;
 		st->txh.transparent = 1;
-	} 
+	}
 	else if (new_pixel_format==GF_PIXEL_RGBDS) {
-			st->txh.stride = w * 4;
-			st->txh.transparent = 1;
+		st->txh.stride = w * 4;
+		st->txh.transparent = 1;
 	}
 	else {
 		st->txh.stride = w * 3;
@@ -252,13 +252,16 @@ u32 layer3d_setup_offscreen(GF_Node *node, Layer3DStack *st, GF_TraverseState *t
 			st->unsupported = 1;
 			return 0;
 		}
+		visual_3d_reset_graphics(compositor->visual);
 		/*reload openGL ext*/
 		gf_sc_load_opengl_extensions(compositor, 1);
+		/*load openGL shaders*/
+		visual_3d_init_shaders(compositor->visual);
 	}
 #endif
 	st->txh.data = (char*)gf_malloc(sizeof(unsigned char) * st->txh.stride * st->txh.height);
 	memset(st->txh.data, 0, sizeof(unsigned char) * st->txh.stride * st->txh.height);
-	
+
 	/*set stencil texture - we don't check error as an image could not be supported by the rasterizer
 	but still supported by the blitter (case of RGBD/RGBDS)*/
 	compositor->rasterizer->stencil_set_texture(stencil, st->txh.data, st->txh.width, st->txh.height, st->txh.stride, st->txh.pixelformat, st->txh.pixelformat, 0);
@@ -282,7 +285,7 @@ u32 layer3d_setup_offscreen(GF_Node *node, Layer3DStack *st, GF_TraverseState *t
 static void layer3d_draw_2d(GF_Node *node, GF_TraverseState *tr_state)
 {
 	DrawableContext *ctx = tr_state->ctx;
-	if (tr_state->visual->DrawBitmap(tr_state->visual, tr_state, ctx, NULL)) 
+	if (tr_state->visual->DrawBitmap(tr_state->visual, tr_state, ctx))
 		return;
 
 	visual_2d_texture_path(tr_state->visual, ctx->drawable->path, ctx, tr_state);
@@ -345,15 +348,20 @@ static void TraverseLayer3D(GF_Node *node, void *rs, Bool is_destroy)
 	GF_Matrix2D mx2d_backup;
 	GF_Camera *prev_cam;
 	GF_VisualManager *old_visual;
+	GF_Matrix2D *transform;
 	M_Layer3D *l = (M_Layer3D *)node;
 	Layer3DStack *st = (Layer3DStack *) gf_node_get_private(node);
 	GF_TraverseState *tr_state = (GF_TraverseState *) rs;
-	
+	GF_TraverseState a_tr;
+	u32 old_type_3d;
+
 	if (is_destroy) {
 		DestroyLayer3D(node);
 		return;
 	}
 	if (st->unsupported) return;
+
+	memcpy(&a_tr, tr_state, sizeof(GF_TraverseState));
 
 	if (gf_node_dirty_get(node)) {
 
@@ -372,6 +380,19 @@ static void TraverseLayer3D(GF_Node *node, void *rs, Bool is_destroy)
 		changed = 1;
 	}
 
+	transform = &tr_state->transform;
+
+	/*layer3D maintains its own stacks*/
+	oldb = tr_state->backgrounds;
+	oldv = tr_state->viewpoints;
+	oldf = tr_state->fogs;
+	oldn = tr_state->navigations;
+	old_visual = tr_state->visual;
+	prev_layer = tr_state->is_layer;
+	prev_cam = tr_state->camera;
+	bbox_backup = tr_state->bbox;
+
+
 	switch (tr_state->traversing_mode) {
 	case TRAVERSE_GET_BOUNDS:
 		if (!tr_state->for_node) {
@@ -380,11 +401,30 @@ static void TraverseLayer3D(GF_Node *node, void *rs, Bool is_destroy)
 			return;
 		}
 	case TRAVERSE_PICK:
+		/*layers can only be used in a 2D context*/
+		if (tr_state->camera && tr_state->camera->is_3D)
+			return;
+		break;
+
 	case TRAVERSE_SORT:
 		/*layers can only be used in a 2D context*/
-		if (tr_state->camera && tr_state->camera->is_3D) return;
+		if (tr_state->camera && tr_state->camera->is_3D)
+			return;
+
+		if (tr_state->visual->compositor->hybrid_opengl) {
+			DrawableContext *ctx = drawable_init_context_mpeg4(st->drawable, tr_state);
+			if (!ctx) goto l3d_exit;
+			ctx->aspect.fill_texture = &st->txh;
+			ctx->flags |= CTX_APP_DIRTY | CTX_IS_TRANSPARENT;
+			drawable_finalize_sort(ctx, tr_state, &st->clip);
+			return;
+		}
 		break;
 	case TRAVERSE_DRAW_2D:
+		if (tr_state->visual->compositor->hybrid_opengl) {
+			transform = &tr_state->ctx->transform;
+			break;
+		}
 		layer3d_draw_2d(node, tr_state);
 		return;
 	case TRAVERSE_DRAW_3D:
@@ -393,51 +433,34 @@ static void TraverseLayer3D(GF_Node *node, void *rs, Bool is_destroy)
 	}
 
 	/*layer3D maintains its own stacks*/
-	oldb = tr_state->backgrounds;
-	oldv = tr_state->viewpoints;
-	oldf = tr_state->fogs;
-	oldn = tr_state->navigations;
 	tr_state->backgrounds = st->visual->back_stack;
 	tr_state->viewpoints = st->visual->view_stack;
 	tr_state->navigations = st->visual->navigation_stack;
 	tr_state->fogs = st->visual->fog_stack;
-	prev_layer = tr_state->is_layer;
 	tr_state->is_layer = 1;
-
-	prev_cam = tr_state->camera;
 	tr_state->camera = &st->visual->camera;
-	old_visual = tr_state->visual;
 
-	bbox_backup = tr_state->bbox;
 	gf_mx_copy(model_backup, tr_state->model_matrix);
 	gf_mx2d_copy(mx2d_backup, tr_state->transform);
-
 
 	/*compute viewport in visual coordinate*/
 	rc = st->clip;
 	if (prev_cam) {
+
 		gf_mx_apply_rect(&tr_state->model_matrix, &rc);
 
-		gf_mx_apply_rect(&prev_cam->modelview, &rc);
+		if (tr_state->visual->compositor->hybrid_opengl) {
+			gf_mx2d_apply_rect(transform, &rc);
+		} else {
+			gf_mx_apply_rect(&prev_cam->modelview, &rc);
+		}
+
 		if (tr_state->camera->flags & CAM_HAS_VIEWPORT)
 			gf_mx_apply_rect(&prev_cam->viewport, &rc);
-#if 0
-		if (tr_state->visual->compositor->visual==tr_state->visual) {
-			GF_Matrix mx;
-			gf_mx_init(mx);
-			gf_mx_add_scale(&mx, tr_state->visual->compositor->scale_x, tr_state->visual->compositor->scale_y, FIX_ONE);
-			gf_mx_apply_rect(&mx, &rc);
-		}
-#endif
+
 	} else {
 		gf_mx2d_apply_rect(&tr_state->transform, &rc);
 
-/*		if (tr_state->visual->compositor->visual==tr_state->visual) {
-			gf_mx2d_init(mx2d_backup);
-			gf_mx2d_add_scale(&mx2d_backup, tr_state->visual->compositor->scale_x, tr_state->visual->compositor->scale_y);
-			gf_mx2d_apply_rect(&mx2d_backup, &rc);
-		}
-*/
 		/*switch visual*/
 		tr_state->visual = st->visual;
 	}
@@ -446,11 +469,12 @@ static void TraverseLayer3D(GF_Node *node, void *rs, Bool is_destroy)
 	/*check bindables*/
 	gf_mx_init(tr_state->model_matrix);
 	l3d_CheckBindables(node, tr_state, st->first);
+
 	if (prev_cam) gf_mx_copy(tr_state->model_matrix, model_backup);
 
-
 	/*drawing a layer means drawing all subelements as a whole (no depth sorting with parents)*/
-	if (tr_state->traversing_mode==TRAVERSE_SORT) {
+	if ((tr_state->traversing_mode==TRAVERSE_SORT) || (tr_state->traversing_mode==TRAVERSE_DRAW_2D)) {
+		u32 trav_mode = tr_state->traversing_mode;
 
 		if (gf_node_dirty_get(node)) changed = 1;
 		gf_node_dirty_clear(node, GF_SG_NODE_DIRTY|GF_SG_VRML_BINDABLE_DIRTY);
@@ -472,30 +496,27 @@ static void TraverseLayer3D(GF_Node *node, void *rs, Bool is_destroy)
 			if (st->tgl_ctx) ostgl_make_current(st->tgl_ctx, 0);
 #endif
 
-			/*note that we don't backup the state as a layer3D cannot be declared in a layer3D*/
-			tr_state->layer3d = node;
-
 			rc = st->vp;
 			/*setup GL*/
 			visual_3d_setup(tr_state->visual);
-
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_PROJECTION);
-			visual_3d_matrix_reset(tr_state->visual);
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_TEXTURE);
-			visual_3d_matrix_reset(tr_state->visual);
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_MODELVIEW);
-			visual_3d_matrix_reset(tr_state->visual);
-		} else {
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_PROJECTION);
-			visual_3d_matrix_push(tr_state->visual);
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_TEXTURE);
-			visual_3d_matrix_push(tr_state->visual);
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_MODELVIEW);
-			visual_3d_matrix_push(tr_state->visual);
 		}
+		/*note that we don't backup the state as a layer3D cannot be declared in a layer3D*/
+		tr_state->layer3d = node;
+
+
 		GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Layer3D] Redrawing\n"));
 
 		layer3d_setup_clip(st, tr_state, prev_cam ? 1 : 0, rc);
+
+		//this only happens in hybridGL mode
+		if (trav_mode==TRAVERSE_DRAW_2D) {
+			visual_2d_flush_hybgl_canvas(tr_state->visual, NULL, tr_state->ctx, tr_state);
+		}
+
+		old_type_3d = tr_state->visual->type_3d;
+		tr_state->visual->type_3d = 2;
+
+		visual_3d_clear_all_lights(tr_state->visual);
 
 		cur_lights = tr_state->visual->num_lights;
 		/*this will init projection. Note that we're binding the viewpoint in the current pixelMetrics context
@@ -503,7 +524,7 @@ static void TraverseLayer3D(GF_Node *node, void *rs, Bool is_destroy)
 		if no previous camera, we're using offscreen rendering, force clear */
 		visual_3d_init_draw(tr_state, prev_cam ? 1 : 2);
 
-		visual_3d_check_collisions(tr_state, l->children);
+		visual_3d_check_collisions(tr_state, NULL, l->children);
 		tr_state->traversing_mode = TRAVERSE_SORT;
 
 		/*shortcut node list*/
@@ -523,32 +544,23 @@ static void TraverseLayer3D(GF_Node *node, void *rs, Bool is_destroy)
 			visual_3d_remove_last_light(tr_state->visual);
 		}
 
-		tr_state->traversing_mode = TRAVERSE_SORT;
-
-		if (prev_cam) {
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_PROJECTION);
-			visual_3d_matrix_pop(tr_state->visual);
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_TEXTURE);
-			visual_3d_matrix_pop(tr_state->visual);
-			visual_3d_set_matrix_mode(tr_state->visual, V3D_MATRIX_MODELVIEW);
-			visual_3d_matrix_pop(tr_state->visual);
-		}
-
+		tr_state->traversing_mode = trav_mode ;
+		tr_state->visual->type_3d = old_type_3d;
+		tr_state->layer3d = NULL;
 
 		/*!! we were in a 2D mode, create drawable context!!*/
-		if (!prev_cam) {
+		if (!prev_cam ) {
 			DrawableContext *ctx;
-			
 			/*with TinyGL we draw directly to the offscreen buffer*/
 #ifndef GPAC_USE_TINYGL
 			gf_sc_copy_to_stencil(&st->txh);
 #else
-			if (st->txh.pixelformat==GF_PIXEL_RGBDS) 
-				gf_get_tinygl_depth(&st->txh); 
+			if (st->txh.pixelformat==GF_PIXEL_RGBDS)
+				gf_get_tinygl_depth(&st->txh);
 #endif
 
-			if (tr_state->visual->compositor->rasterizer->stencil_texture_modified) 
-				tr_state->visual->compositor->rasterizer->stencil_texture_modified(gf_sc_texture_get_stencil(&st->txh) ); 
+			if (tr_state->visual->compositor->rasterizer->stencil_texture_modified)
+				tr_state->visual->compositor->rasterizer->stencil_texture_modified(gf_sc_texture_get_stencil(&st->txh) );
 			gf_sc_texture_set_stencil(&st->txh, gf_sc_texture_get_stencil(&st->txh) );
 			changed = 1;
 
@@ -556,12 +568,11 @@ layer3d_unchanged_2d:
 
 			/*restore visual*/
 			tr_state->visual = old_visual;
-			tr_state->layer3d = NULL;
 			tr_state->appear = NULL;
-		//	tr_state->camera = prev_cam;
+			//	tr_state->camera = prev_cam;
 
 			ctx = drawable_init_context_mpeg4(st->drawable, tr_state);
-			if (!ctx) return;
+			if (!ctx) goto l3d_exit;
 			ctx->aspect.fill_texture = &st->txh;
 			ctx->flags |= CTX_NO_ANTIALIAS;
 			if (changed) ctx->flags |= CTX_APP_DIRTY;
@@ -581,16 +592,22 @@ layer3d_unchanged_2d:
 
 		layer3d_setup_clip(st, tr_state, prev_cam ? 1 : 0, rc);
 
+		old_type_3d = tr_state->visual->type_3d;
+		tr_state->visual->type_3d = 2;
+
 		if (tr_state->visual->compositor->active_layer==node) {
 			do_pick = (tr_state->visual->compositor->grabbed_sensor || tr_state->visual->compositor->navigation_state) ? 1 : 0;
 		}
 
-		if (!prev_cam) gf_mx_from_mx2d(&tr_state->model_matrix, &tr_state->transform);
-		
-		if (!do_pick && !gf_list_count(tr_state->visual->compositor->sensors)) 
+		if (!prev_cam || tr_state->visual->compositor->hybrid_opengl) gf_mx_from_mx2d(&tr_state->model_matrix, &tr_state->transform);
+
+		if (!do_pick && !gf_list_count(tr_state->visual->compositor->sensors))
 			do_pick = gf_sc_pick_in_clipper(tr_state, &st->clip);
 
-		if (!do_pick) goto l3d_exit;
+		if (!do_pick) {
+			tr_state->visual->type_3d = old_type_3d;
+			goto l3d_exit;
+		}
 
 		prev_r = tr_state->ray;
 
@@ -609,31 +626,46 @@ layer3d_unchanged_2d:
 		}
 
 		visual_3d_setup_projection(tr_state, 1);
+
 		in_x = 2 * gf_divfix(start.x, st->visual->camera.width);
 		in_y = 2 * gf_divfix(start.y, st->visual->camera.height);
-					
-		res.x = in_x; res.y = in_y; res.z = -FIX_ONE; res.q = FIX_ONE;
+
+		res.x = in_x;
+		res.y = in_y;
+		res.z = -FIX_ONE;
+		res.q = FIX_ONE;
 		gf_mx_apply_vec_4x4(&st->visual->camera.unprojection, &res);
-		if (!res.q) goto l3d_exit;
+		if (!res.q) {
+			tr_state->visual->type_3d = old_type_3d;
+			goto l3d_exit;
+		}
 		start.x = gf_divfix(res.x, res.q);
 		start.y = gf_divfix(res.y, res.q);
 		start.z = gf_divfix(res.z, res.q);
 
-		res.x = in_x; res.y = in_y; res.z = FIX_ONE; res.q = FIX_ONE;
+		res.x = in_x;
+		res.y = in_y;
+		res.z = FIX_ONE;
+		res.q = FIX_ONE;
 		gf_mx_apply_vec_4x4(&st->visual->camera.unprojection, &res);
-		if (!res.q) goto l3d_exit;
+		if (!res.q) {
+			tr_state->visual->type_3d = old_type_3d;
+			goto l3d_exit;
+		}
 		end.x = gf_divfix(res.x, res.q);
 		end.y = gf_divfix(res.y, res.q);
 		end.z = gf_divfix(res.z, res.q);
 		tr_state->ray = gf_ray(start, end);
 
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Layer3D] Picking: cast ray\n\tOrigin %.4f %.4f %.4f - End %.4f %.4f %.4f\n\tDir %.4f %.4f %.4f\n", 
-			FIX2FLT(tr_state->ray.orig.x), FIX2FLT(tr_state->ray.orig.y), FIX2FLT(tr_state->ray.orig.z),
-			FIX2FLT(end.x), FIX2FLT(end.y), FIX2FLT(end.z),
-			FIX2FLT(tr_state->ray.dir.x), FIX2FLT(tr_state->ray.dir.y), FIX2FLT(tr_state->ray.dir.z)));
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Layer3D] Picking: cast ray\n\tOrigin %.4f %.4f %.4f - End %.4f %.4f %.4f\n\tDir %.4f %.4f %.4f\n",
+		                                      FIX2FLT(tr_state->ray.orig.x), FIX2FLT(tr_state->ray.orig.y), FIX2FLT(tr_state->ray.orig.z),
+		                                      FIX2FLT(end.x), FIX2FLT(end.y), FIX2FLT(end.z),
+		                                      FIX2FLT(tr_state->ray.dir.x), FIX2FLT(tr_state->ray.dir.y), FIX2FLT(tr_state->ray.dir.z)));
 
 		group_3d_traverse(node, (GroupingNode *)st, tr_state);
 		tr_state->ray = prev_r;
+
+		tr_state->visual->type_3d = old_type_3d;
 
 		/*store info if navigation allowed - we just override any layer3D picked first since we are picking 2D
 		objects*/
@@ -644,9 +676,16 @@ layer3d_unchanged_2d:
 	}
 
 l3d_exit:
+
 	/*restore camera*/
 	tr_state->camera = prev_cam;
-	if (prev_cam) visual_3d_set_viewport(tr_state->visual, tr_state->camera->vp);
+	if (prev_cam) {
+		//remember to reload previous projection matrix
+		visual_3d_projection_matrix_modified(tr_state->visual);
+		if (tr_state->visual == old_visual) {
+			visual_3d_set_viewport(tr_state->visual, tr_state->camera->vp);
+		}
+	}
 	tr_state->visual = old_visual;
 
 	/*restore traversing state*/
@@ -671,6 +710,10 @@ void compositor_init_layer3d(GF_Compositor *compositor, GF_Node *node)
 {
 	Layer3DStack *stack;
 	GF_SAFEALLOC(stack, Layer3DStack);
+	if (!stack) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate layer 3d stack\n"));
+		return;
+	}
 
 	stack->visual = visual_new(compositor);
 	stack->visual->type_3d = 2;

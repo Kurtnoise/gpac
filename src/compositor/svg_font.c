@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2007-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -44,7 +44,7 @@ typedef struct
 static GF_Err svg_font_get_glyphs(void *udta, const char *utf_string, u32 *glyph_buffer, u32 *io_glyph_buffer_size, const char *lang, Bool *is_rtl)
 {
 	u32 prev_c;
-	u32 len;
+	size_t len;
 	u32 i, gl_idx;
 	u16 *utf_res;
 	GF_Node *node = (GF_Node *)udta;
@@ -52,34 +52,34 @@ static GF_Err svg_font_get_glyphs(void *udta, const char *utf_string, u32 *glyph
 	char *utf8 = (char*) utf_string;
 
 	/*FIXME - use glyphs unicode attributes for glyph substitution*/
-	len = utf_string ? strlen(utf_string) : 0;
+	len = utf_string ? (u32) strlen(utf_string) : 0;
 	if (!len) {
 		*io_glyph_buffer_size = 0;
 		return GF_OK;
 	}
 
 	if (*io_glyph_buffer_size < len+1) {
-		*io_glyph_buffer_size = len+1;
+		*io_glyph_buffer_size = (u32) len+1;
 		return GF_BUFFER_TOO_SMALL;
 	}
 
 	len = gf_utf8_mbstowcs((u16*) glyph_buffer, *io_glyph_buffer_size, (const char**)&utf8);
-	if ((s32) len < 0) return GF_IO_ERR;
+	if (len == (size_t) -1) return GF_IO_ERR;
 	/*should not happen*/
 	if (utf8) return GF_IO_ERR;
 
 	/*perform bidi relayout*/
 	utf_res = (u16 *) glyph_buffer;
-	*is_rtl = gf_utf8_reorder_bidi(utf_res, len);
+	*is_rtl = gf_utf8_reorder_bidi(utf_res, (u32) len);
 
 	/*move 16bit buffer to 32bit*/
-	for (i=len; i>0; i--) {
+	for (i=(u32)len; i>0; i--) {
 		glyph_buffer[i-1] = utf_res[i-1];
 	}
 
 	gl_idx = 0;
 	prev_c = 0;
-	for (i=0;i<len; i++) {
+	for (i=0; i<len; i++) {
 		SVG_GlyphStack *missing_glyph = NULL;
 		SVG_GlyphStack *st = NULL;
 		child = ((GF_ParentNode *) node)->children;
@@ -90,7 +90,7 @@ static GF_Err svg_font_get_glyphs(void *udta, const char *utf_string, u32 *glyph
 			} else if (tag ==TAG_SVG_glyph) {
 				Bool glyph_ok = 0;
 				SVGAllAttributes atts;
-				
+
 				st = gf_node_get_private(child->node);
 				if (!st) {
 					child = child->next;
@@ -150,15 +150,15 @@ static GF_Err svg_font_get_glyphs(void *udta, const char *utf_string, u32 *glyph
 		}
 		prev_c = glyph_buffer[i];
 
-		if (!st) 
+		if (!st)
 			st = missing_glyph;
 		glyph_buffer[gl_idx] = st ? st->glyph.ID : 0;
 		if (st && st->uni_len>1) i++;
-		
+
 		gl_idx++;
 	}
-	*io_glyph_buffer_size = len = gl_idx;
-	
+	*io_glyph_buffer_size = /* len = */ gl_idx;
+
 	return GF_OK;
 }
 
@@ -176,7 +176,7 @@ static GF_Glyph *svg_font_load_glyph(void *udta, u32 glyph_name)
 		}
 		child = child->next;
 	}
-	
+
 	return NULL;
 }
 
@@ -196,7 +196,7 @@ static void svg_font_on_load(GF_Node *handler, GF_DOM_Event *event, GF_Node *obs
 {
 	GF_Compositor *compositor;
 	GF_Font *font;
-	assert(event->currentTarget->ptr_type==GF_DOM_EVENT_NODE);
+	assert(event->currentTarget->ptr_type==GF_DOM_EVENT_TARGET_NODE);
 	assert(gf_node_get_tag((GF_Node*)event->currentTarget->ptr)==TAG_SVG_font);
 	font = gf_node_get_private((GF_Node*)event->currentTarget->ptr);
 	font->not_loaded = 0;
@@ -224,6 +224,10 @@ void compositor_init_svg_font(GF_Compositor *compositor, GF_Node *node)
 
 	/*register font to font manager*/
 	GF_SAFEALLOC(font, GF_Font);
+	if (!font) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate svg font\n"));
+		return;
+	}
 	e = gf_font_manager_register_font(compositor->font_manager, font);
 	if (e) {
 		gf_free(font);
@@ -264,25 +268,51 @@ void compositor_init_svg_font(GF_Compositor *compositor, GF_Node *node)
 
 	if (atts.font_weight) {
 		switch(*atts.font_weight) {
-		case SVG_FONTWEIGHT_100: font->styles |= GF_FONT_WEIGHT_100; break;
-		case SVG_FONTWEIGHT_LIGHTER: font->styles |= GF_FONT_WEIGHT_LIGHTER; break;
-		case SVG_FONTWEIGHT_200: font->styles |= GF_FONT_WEIGHT_200; break;
-		case SVG_FONTWEIGHT_300: font->styles |= GF_FONT_WEIGHT_300; break;
-		case SVG_FONTWEIGHT_400: font->styles |= GF_FONT_WEIGHT_400; break;
-		case SVG_FONTWEIGHT_NORMAL: font->styles |= GF_FONT_WEIGHT_NORMAL; break;
-		case SVG_FONTWEIGHT_500: font->styles |= GF_FONT_WEIGHT_500; break;
-		case SVG_FONTWEIGHT_600: font->styles |= GF_FONT_WEIGHT_600; break;
-		case SVG_FONTWEIGHT_700: font->styles |= GF_FONT_WEIGHT_700; break;
-		case SVG_FONTWEIGHT_BOLD: font->styles |= GF_FONT_WEIGHT_BOLD; break;
-		case SVG_FONTWEIGHT_800: font->styles |= GF_FONT_WEIGHT_800; break;
-		case SVG_FONTWEIGHT_900: font->styles |= GF_FONT_WEIGHT_900; break;
-		case SVG_FONTWEIGHT_BOLDER: font->styles |= GF_FONT_WEIGHT_BOLDER; break;
+		case SVG_FONTWEIGHT_100:
+			font->styles |= GF_FONT_WEIGHT_100;
+			break;
+		case SVG_FONTWEIGHT_LIGHTER:
+			font->styles |= GF_FONT_WEIGHT_LIGHTER;
+			break;
+		case SVG_FONTWEIGHT_200:
+			font->styles |= GF_FONT_WEIGHT_200;
+			break;
+		case SVG_FONTWEIGHT_300:
+			font->styles |= GF_FONT_WEIGHT_300;
+			break;
+		case SVG_FONTWEIGHT_400:
+			font->styles |= GF_FONT_WEIGHT_400;
+			break;
+		case SVG_FONTWEIGHT_NORMAL:
+			font->styles |= GF_FONT_WEIGHT_NORMAL;
+			break;
+		case SVG_FONTWEIGHT_500:
+			font->styles |= GF_FONT_WEIGHT_500;
+			break;
+		case SVG_FONTWEIGHT_600:
+			font->styles |= GF_FONT_WEIGHT_600;
+			break;
+		case SVG_FONTWEIGHT_700:
+			font->styles |= GF_FONT_WEIGHT_700;
+			break;
+		case SVG_FONTWEIGHT_BOLD:
+			font->styles |= GF_FONT_WEIGHT_BOLD;
+			break;
+		case SVG_FONTWEIGHT_800:
+			font->styles |= GF_FONT_WEIGHT_800;
+			break;
+		case SVG_FONTWEIGHT_900:
+			font->styles |= GF_FONT_WEIGHT_900;
+			break;
+		case SVG_FONTWEIGHT_BOLDER:
+			font->styles |= GF_FONT_WEIGHT_BOLDER;
+			break;
 		}
 	}
 
 	gf_svg_flatten_attributes((SVG_Element*)node_font, &atts);
 	font->max_advance_h = atts.horiz_adv_x ? FIX2INT( gf_ceil(atts.horiz_adv_x->value) ) : 0;
-	
+
 	font->not_loaded = 1;
 
 	/*wait for onLoad event before activating the font, otherwise we may not have all the glyphs*/
@@ -293,7 +323,7 @@ void compositor_init_svg_font(GF_Compositor *compositor, GF_Node *node)
 
 
 static void svg_traverse_glyph(GF_Node *node, void *rs, Bool is_destroy)
-{	
+{
 	if (is_destroy) {
 		GF_Font *font;
 		GF_Glyph *prev_glyph, *a_glyph;
@@ -321,7 +351,7 @@ void compositor_init_svg_glyph(GF_Compositor *compositor, GF_Node *node)
 {
 	u16 utf_name[20];
 	u8 *utf8;
-	u32 len;
+	size_t len;
 	GF_Rect rc;
 	GF_Glyph *glyph;
 	GF_Font *font;
@@ -339,13 +369,15 @@ void compositor_init_svg_glyph(GF_Compositor *compositor, GF_Node *node)
 
 	if (gf_node_get_tag(node)==TAG_SVG_missing_glyph) {
 		GF_SAFEALLOC(st, SVG_GlyphStack);
+		if (!st) return;
 		goto reg_common;
 	}
 	/*we must have unicode specified*/
 	if (!atts.unicode) return;
 
 	GF_SAFEALLOC(st, SVG_GlyphStack);
-	utf8 = *atts.unicode;
+	if (!st) return;
+	utf8 = (u8 *) *atts.unicode;
 	len = gf_utf8_mbstowcs(utf_name, 200, (const char **) &utf8);
 	/*this is a single glyph*/
 	if (len==1) {
@@ -354,12 +386,12 @@ void compositor_init_svg_glyph(GF_Compositor *compositor, GF_Node *node)
 	} else {
 		st->glyph.utf_name = (u32) (PTR_TO_U_CAST st);
 		st->unicode = gf_malloc(sizeof(u16)*len);
-		st->uni_len = len;
+		st->uni_len = (u16) len;
 		memcpy(st->unicode, utf_name, sizeof(u16)*len);
 	}
 
 reg_common:
-	st->glyph.ID = (u32) (PTR_TO_U_CAST st);
+	st->glyph.ID = (u32)(PTR_TO_U_CAST st);
 	st->font = font;
 	st->glyph.horiz_advance = font->max_advance_h;
 	if (atts.horiz_adv_x) st->glyph.horiz_advance = FIX2INT( gf_ceil(atts.horiz_adv_x->value) );
@@ -370,7 +402,7 @@ reg_common:
 		st->glyph.height = FIX2INT( gf_ceil(rc.height) );
 	}
 	st->glyph.vert_advance = st->glyph.height;
-	if (!st->glyph.vert_advance) 
+	if (!st->glyph.vert_advance)
 		st->glyph.vert_advance = font->max_advance_v;
 
 	/*register glyph*/
@@ -419,7 +451,7 @@ static Bool svg_font_uri_check(GF_Node *node, FontURIStack *st)
 		if (!atts.xlink_href->target) return 0;
 	}
 	font_elt = atts.xlink_href->target;
-	if (gf_node_get_tag(font_elt) != TAG_SVG_font) return 0; 
+	if (gf_node_get_tag(font_elt) != TAG_SVG_font) return 0;
 	font = gf_node_get_private(font_elt);
 	if (!font) return 0;
 	st->alias = font;
@@ -492,12 +524,22 @@ void compositor_init_svg_font_face_uri(GF_Compositor *compositor, GF_Node *node)
 
 	/*register font to font manager*/
 	GF_SAFEALLOC(font, GF_Font);
+	if (!font) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate font for svg font face URI\n"));
+		return;
+	}
+	
 	e = gf_font_manager_register_font(compositor->font_manager, font);
 	if (e) {
 		gf_free(font);
 		return;
 	}
 	GF_SAFEALLOC(stack, FontURIStack);
+	if (!stack) {
+		gf_free(font);
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate svg font face URI stack\n"));
+		return;
+	}
 	stack->font = font;
 	stack->compositor = compositor;
 

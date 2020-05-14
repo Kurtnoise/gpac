@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -79,7 +79,7 @@ void BindableStackDelete(GF_List *stack);
 /*for user-modif of viewport/viewpoint*/
 void Bindable_SetSetBind(GF_Node *bindable, Bool val);
 
-/*special user-modif of viewport/viewpoint: 
+/*special user-modif of viewport/viewpoint:
  if stack is not NULL, binding is only performed in this stack
  otherwise,  binding is performed on all stack*/
 void Bindable_SetSetBindEx(GF_Node *bindable, Bool val, GF_List *stack);
@@ -91,6 +91,7 @@ typedef struct
 	GF_List *reg_stacks;
 	Bool prev_was_bound;
 	GF_Matrix world_view_mx;
+	SFVec2f last_vp_size;
 	u32 last_sim_time;
 } ViewStack;
 
@@ -108,8 +109,10 @@ typedef struct
 #ifndef GPAC_DISABLE_3D
 	GF_Mesh *mesh;
 	GF_BBox prev_bounds;
+	Bool hybgl_init;
 #endif
 	u32 flags;
+	char col_tx[12];
 } Background2DStack;
 
 #ifndef GPAC_DISABLE_3D
@@ -124,6 +127,7 @@ typedef struct
 
 	GF_Mesh *front_mesh, *back_mesh, *top_mesh, *bottom_mesh, *left_mesh, *right_mesh;
 	GF_TextureHandler txh_front, txh_back, txh_top, txh_bottom, txh_left, txh_right;
+	GF_Matrix current_mx;
 } BackgroundStack;
 #endif
 
@@ -259,7 +263,8 @@ void compositor_init_indexed_triangle_fan_set(GF_Compositor *compositor, GF_Node
 GF_TextureHandler *compositor_mpeg4_get_gradient_texture(GF_Node *node);
 
 /*hardcoded protos*/
-void compositor_init_hardcoded_proto(GF_Compositor *compositor, GF_Node *node);
+void gf_sc_init_hardcoded_proto(GF_Compositor *compositor, GF_Node *node);
+GF_TextureHandler *gf_sc_hardcoded_proto_get_texture_handler(GF_Node *n);
 
 #ifndef GPAC_DISABLE_3D
 void compositor_extrude_text(GF_Node *node, GF_TraverseState *tr_state, GF_Mesh *mesh, MFVec3f *thespine, Fixed creaseAngle, Bool begin_cap, Bool end_cap, MFRotation *spine_ori, MFVec2f *spine_scale, Bool txAlongSpine);

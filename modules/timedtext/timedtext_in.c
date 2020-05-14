@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -54,43 +54,47 @@ typedef struct
 
 
 const char * TTIN_MIME_TYPES[] = {
-  "x-subtitle/srt", "srt", "SRT SubTitles",
-  "x-subtitle/sub", "sub", "SUB SubTitles",
-  "x-subtitle/ttxt", "ttxt", "3GPP TimedText",
-  NULL
+	"x-subtitle/srt", "srt", "SRT SubTitles",
+	"x-subtitle/sub", "sub", "SUB SubTitles",
+	"x-subtitle/ttxt", "ttxt", "3GPP TimedText",
+	"text/vtt", "vtt", "VTT SubTitles",
+	NULL
 };
 
-static u32 TTIN_RegisterMimeTypes(const GF_InputService *plug){
-    u32 i;
-    if (!plug)
-      return 0;
-    for (i = 0 ; TTIN_MIME_TYPES[i]; i+=3){
-	gf_term_register_mime_type(plug, TTIN_MIME_TYPES[i], TTIN_MIME_TYPES[i+1], TTIN_MIME_TYPES[i+2]);
-    }
-    return i/3;
+static u32 TTIN_RegisterMimeTypes(const GF_InputService *plug) {
+	u32 i;
+	if (!plug)
+		return 0;
+	for (i = 0 ; TTIN_MIME_TYPES[i]; i+=3) {
+		gf_service_register_mime(plug, TTIN_MIME_TYPES[i], TTIN_MIME_TYPES[i+1], TTIN_MIME_TYPES[i+2]);
+	}
+	return i/3;
 }
 
 static Bool TTIn_CanHandleURL(GF_InputService *plug, const char *url)
 {
 	char *sExt;
 	u32 i;
-        if (!plug || !url)
-          return 0;
+	if (!plug || !url)
+		return GF_FALSE;
 	sExt = strrchr(url, '.');
-	if (!sExt) return 0;
-	for (i = 0 ; TTIN_MIME_TYPES[i]; i+=3){
-	  if (gf_term_check_extension(plug, TTIN_MIME_TYPES[i], TTIN_MIME_TYPES[i+1], TTIN_MIME_TYPES[i+2], sExt)) return 1;
+	if (!sExt)
+		return GF_FALSE;
+	for (i = 0 ; TTIN_MIME_TYPES[i]; i+=3) {
+		if (gf_service_check_mime_register(plug, TTIN_MIME_TYPES[i], TTIN_MIME_TYPES[i+1], TTIN_MIME_TYPES[i+2], sExt))
+			return GF_TRUE;
 	}
-	return 0;
+	return GF_FALSE;
 }
 
 static Bool TTIn_is_local(const char *url)
 {
-        if (!url)
-          return 0;
-	if (!strnicmp(url, "file://", 7)) return 1;
-	if (strstr(url, "://")) return 0;
-	return 1;
+	if (!url)
+		return GF_FALSE;
+	if (!strnicmp(url, "file://", 7)) return GF_TRUE;
+	if (!strnicmp(url, "gmem://", 7)) return GF_TRUE;
+	if (strstr(url, "://")) return GF_FALSE;
+	return GF_TRUE;
 }
 
 static GF_ESD *tti_get_esd(TTIn *tti)
@@ -98,13 +102,14 @@ static GF_ESD *tti_get_esd(TTIn *tti)
 	return gf_media_map_esd(tti->mp4, tti->tt_track);
 }
 
-static void tti_setup_object(TTIn *tti)
+static void tti_setup_object(TTIn *tti, GF_InputService *plug)
 {
 	GF_ObjectDescriptor *od = (GF_ObjectDescriptor *) gf_odf_desc_new(GF_ODF_OD_TAG);
 	GF_ESD *esd = tti_get_esd(tti);
-	od->objectDescriptorID = esd->ESID;
+	od->objectDescriptorID = 0;
+	od->service_ifce = plug;
 	gf_list_add(od->ESDescriptors, esd);
-	gf_term_add_media(tti->service, (GF_Descriptor *)od, 0);
+	gf_service_declare_media(tti->service, (GF_Descriptor *)od, GF_FALSE);
 }
 
 
@@ -115,9 +120,9 @@ GF_Err TTIn_LoadFile(GF_InputService *plug, const char *url, Bool is_cache)
 	char szFILE[GF_MAX_PATH];
 	TTIn *tti = (TTIn *)plug->priv;
 	const char *cache_dir;
-        if (!tti || !url)
-          return GF_BAD_PARAM;
-        cache_dir = gf_modules_get_option((GF_BaseInterface *)plug, "General", "CacheDirectory");
+	if (!tti || !url)
+		return GF_BAD_PARAM;
+	cache_dir = gf_modules_get_option((GF_BaseInterface *)plug, "General", "CacheDirectory");
 	if (cache_dir && strlen(cache_dir)) {
 		if (cache_dir[strlen(cache_dir)-1] != GF_PATH_SEPARATOR) {
 			sprintf(szFILE, "%s%csrt_%p_mp4", cache_dir, GF_PATH_SEPARATOR, tti);
@@ -129,23 +134,43 @@ GF_Err TTIn_LoadFile(GF_InputService *plug, const char *url, Bool is_cache)
 	}
 	tti->mp4 = gf_isom_open(szFILE, GF_ISOM_OPEN_WRITE, NULL);
 	if (!tti->mp4) return gf_isom_last_error(NULL);
-        if (tti->szFile)
-          gf_free(tti->szFile);
+	if (tti->szFile)
+		gf_free(tti->szFile);
 	tti->szFile = gf_strdup(szFILE);
 
 	memset(&import, 0, sizeof(GF_MediaImporter));
 	import.dest = tti->mp4;
 	/*override layout from sub file*/
 	import.flags = GF_IMPORT_SKIP_TXT_BOX;
-	import.in_name = gf_strdup(url);
 
-	e = gf_media_import(&import);
+	if (!strnicmp(url, "gmem://", 7)) {
+		u8 *mem_address;
+		u32 size;
+		FILE *tmp_txt;
+		import.streamFormat = "TEXT";
+
+		if (sscanf(url, "gmem://%d@%p", &size, &mem_address) != 2) {
+			return GF_BAD_PARAM;
+		}
+		strcat(szFILE, "_tmptxt");
+		tmp_txt = gf_fopen(szFILE, "w");
+		if (!tmp_txt) return GF_IO_ERR;
+		fwrite(mem_address, size, 1, tmp_txt);
+		gf_fclose(tmp_txt);
+
+		import.in_name = szFILE;
+		e = gf_media_import(&import);
+
+		gf_delete_file(szFILE);
+
+	} else {
+		import.in_name = (char *) url;
+		e = gf_media_import(&import);
+	}
 	if (!e) {
 		tti->tt_track = 1;
-		gf_isom_text_set_streaming_mode(tti->mp4, 1);
+		gf_isom_text_set_streaming_mode(tti->mp4, GF_TRUE);
 	}
-	if (import.in_name)
-          gf_free(import.in_name);
 	return e;
 }
 
@@ -155,9 +180,9 @@ void TTIn_NetIO(void *cbk, GF_NETIO_Parameter *param)
 	const char *szCache;
 	GF_InputService *plug = (GF_InputService *)cbk;
 	TTIn *tti = (TTIn *) plug->priv;
-        if (!tti)
-          return;
-	gf_term_download_update_stats(tti->dnload);
+	if (!tti)
+		return;
+	gf_service_download_update_stats(tti->dnload);
 
 	e = param->error;
 	/*done*/
@@ -165,30 +190,30 @@ void TTIn_NetIO(void *cbk, GF_NETIO_Parameter *param)
 		szCache = gf_dm_sess_get_cache_name(tti->dnload);
 		if (!szCache) e = GF_IO_ERR;
 		else {
-			e = TTIn_LoadFile(plug, szCache, 1);
+			e = TTIn_LoadFile(plug, szCache, GF_TRUE);
 		}
 	}
-	else if (param->msg_type==GF_NETIO_DATA_EXCHANGE)
+	else if (!e || (param->msg_type==GF_NETIO_DATA_EXCHANGE))
 		return;
 
 	/*OK confirm*/
 	if (tti->needs_connection) {
-		tti->needs_connection = 0;
-		gf_term_on_connect(tti->service, NULL, e);
-		if (!e && !tti->od_done) tti_setup_object(tti);
+		tti->needs_connection = GF_FALSE;
+		gf_service_connect_ack(tti->service, NULL, e);
+		if (!e && !tti->od_done) tti_setup_object(tti, plug);
 	}
 }
 
 void TTIn_download_file(GF_InputService *plug, const char *url)
 {
 	TTIn *tti = (TTIn *) plug->priv;
-        if (!plug || !url)
-          return;
-	tti->needs_connection = 1;
-	tti->dnload = gf_term_download_new(tti->service, url, 0, TTIn_NetIO, plug);
+	if (!plug || !url)
+		return;
+	tti->needs_connection = GF_TRUE;
+	tti->dnload = gf_service_download_new(tti->service, url, 0, TTIn_NetIO, plug);
 	if (!tti->dnload) {
-		tti->needs_connection = 0;
-		gf_term_on_connect(tti->service, NULL, GF_NOT_SUPPORTED);
+		tti->needs_connection = GF_FALSE;
+		gf_service_connect_ack(tti->service, NULL, GF_NOT_SUPPORTED);
 	} else {
 		/*start our download (threaded)*/
 		gf_dm_sess_process(tti->dnload);
@@ -200,11 +225,11 @@ static GF_Err TTIn_ConnectService(GF_InputService *plug, GF_ClientService *serv,
 {
 	GF_Err e;
 	TTIn *tti = (TTIn *)plug->priv;
-        if (!plug || !url)
-          return GF_BAD_PARAM;
+	if (!plug || !url)
+		return GF_BAD_PARAM;
 	tti->service = serv;
 
-	if (tti->dnload) gf_term_download_del(tti->dnload);
+	if (tti->dnload) gf_service_download_del(tti->dnload);
 	tti->dnload = NULL;
 
 	/*remote fetch*/
@@ -212,25 +237,25 @@ static GF_Err TTIn_ConnectService(GF_InputService *plug, GF_ClientService *serv,
 		TTIn_download_file(plug, url);
 		return GF_OK;
 	}
-	e = TTIn_LoadFile(plug, url, 0);
-	gf_term_on_connect(serv, NULL, e);
-	if (!e && !tti->od_done) tti_setup_object(tti);
+	e = TTIn_LoadFile(plug, url, GF_FALSE);
+	gf_service_connect_ack(serv, NULL, e);
+	if (!e && !tti->od_done) tti_setup_object(tti, plug);
 	return GF_OK;
 }
 
 static GF_Err TTIn_CloseService(GF_InputService *plug)
 {
 	TTIn *tti;
-        if (!plug)
-          return GF_BAD_PARAM;
-        tti = (TTIn *)plug->priv;
-        if (!tti)
-          return GF_BAD_PARAM;
+	if (!plug)
+		return GF_BAD_PARAM;
+	tti = (TTIn *)plug->priv;
+	if (!tti)
+		return GF_BAD_PARAM;
 	if (tti->samp)
-          gf_isom_sample_del(&tti->samp);
-        tti->samp = NULL;
+		gf_isom_sample_del(&tti->samp);
+	tti->samp = NULL;
 	if (tti->mp4)
-          gf_isom_delete(tti->mp4);
+		gf_isom_delete(tti->mp4);
 	tti->mp4 = NULL;
 	if (tti->szFile) {
 		gf_delete_file(tti->szFile);
@@ -238,22 +263,22 @@ static GF_Err TTIn_CloseService(GF_InputService *plug)
 		tti->szFile = NULL;
 	}
 	if (tti->dnload)
-          gf_term_download_del(tti->dnload);
+		gf_service_download_del(tti->dnload);
 	tti->dnload = NULL;
-        if (tti->service)
-          gf_term_on_disconnect(tti->service, NULL, GF_OK);
-        tti->service = NULL;
+	if (tti->service)
+		gf_service_disconnect_ack(tti->service, NULL, GF_OK);
+	tti->service = NULL;
 	return GF_OK;
 }
 
 static GF_Descriptor *TTIn_GetServiceDesc(GF_InputService *plug, u32 expect_type, const char *sub_url)
 {
 	TTIn *tti;
-        if (!plug)
-          return NULL;
-        tti = (TTIn *)plug->priv;
-        if (!tti)
-          return NULL;
+	if (!plug)
+		return NULL;
+	tti = (TTIn *)plug->priv;
+	if (!tti)
+		return NULL;
 	/*visual object*/
 	switch (expect_type) {
 	case GF_MEDIA_OBJECT_UNDEF:
@@ -264,7 +289,7 @@ static GF_Descriptor *TTIn_GetServiceDesc(GF_InputService *plug, u32 expect_type
 		GF_ESD *esd = tti_get_esd(tti);
 		od->objectDescriptorID = esd->ESID;
 		gf_list_add(od->ESDescriptors, esd);
-		tti->od_done = 1;
+		tti->od_done = GF_TRUE;
 		return (GF_Descriptor *) od;
 	}
 	default:
@@ -278,8 +303,8 @@ static GF_Err TTIn_ConnectChannel(GF_InputService *plug, LPNETCHANNEL channel, c
 	u32 ES_ID;
 	GF_Err e;
 	TTIn *tti = (TTIn *)plug->priv;
-        if (!tti)
-          return GF_BAD_PARAM;
+	if (!tti)
+		return GF_BAD_PARAM;
 	e = GF_SERVICE_ERROR;
 	if (!tti || tti->ch==channel) goto exit;
 
@@ -293,7 +318,7 @@ static GF_Err TTIn_ConnectChannel(GF_InputService *plug, LPNETCHANNEL channel, c
 	}
 
 exit:
-	gf_term_on_connect(tti->service, channel, e);
+	gf_service_connect_ack(tti->service, channel, e);
 	return e;
 }
 
@@ -306,15 +331,15 @@ static GF_Err TTIn_DisconnectChannel(GF_InputService *plug, LPNETCHANNEL channel
 		tti->ch = NULL;
 		e = GF_OK;
 	}
-	gf_term_on_disconnect(tti->service, channel, e);
+	gf_service_disconnect_ack(tti->service, channel, e);
 	return GF_OK;
 }
 
 static GF_Err TTIn_ServiceCommand(GF_InputService *plug, GF_NetworkCommand *com)
 {
 	TTIn *tti = (TTIn *)plug->priv;
-        if (!tti)
-          return GF_BAD_PARAM;
+	if (!tti)
+		return GF_BAD_PARAM;
 	if (!com->base.on_channel) return GF_NOT_SUPPORTED;
 	switch (com->command_type) {
 	case GF_NET_CHAN_SET_PADDING:
@@ -344,8 +369,8 @@ static GF_Err TTIn_ChannelGetSLP(GF_InputService *plug, LPNETCHANNEL channel, ch
 	TTIn *tti = (TTIn *)plug->priv;
 
 	*out_reception_status = GF_OK;
-	*sl_compressed = 0;
-	*is_new_data = 0;
+	*sl_compressed = GF_FALSE;
+	*is_new_data = GF_FALSE;
 
 	memset(&tti->sl_hdr, 0, sizeof(GF_SLHeader));
 	tti->sl_hdr.randomAccessPointFlag = 1;
@@ -372,7 +397,7 @@ static GF_Err TTIn_ChannelGetSLP(GF_InputService *plug, LPNETCHANNEL channel, ch
 				*out_reception_status = GF_CORRUPTED_DATA;
 				return GF_OK;
 			}
-			*is_new_data = 1;
+			*is_new_data = GF_TRUE;
 		}
 		tti->sl_hdr.compositionTimeStamp = tti->sl_hdr.decodingTimeStamp = tti->samp->DTS;
 		*out_data_ptr = tti->samp->data;
@@ -403,7 +428,15 @@ void *NewTTReader()
 	TTIn *priv;
 	GF_InputService *plug;
 	GF_SAFEALLOC(plug, GF_InputService);
-	GF_REGISTER_MODULE_INTERFACE(plug, GF_NET_CLIENT_INTERFACE, "GPAC SubTitle Reader", "gpac distribution")
+	if (!plug) return NULL;
+	GF_REGISTER_MODULE_INTERFACE(plug, GF_NET_CLIENT_INTERFACE, "GPAC TimedText Reader", "gpac distribution")
+
+	GF_SAFEALLOC(priv, TTIn);
+	if (!priv) {
+		gf_free(plug);
+		return NULL;
+	}
+	plug->priv = priv;
 
 	plug->RegisterMimeTypes = TTIN_RegisterMimeTypes;
 	plug->CanHandleURL = TTIn_CanHandleURL;
@@ -416,24 +449,21 @@ void *NewTTReader()
 	plug->ChannelGetSLP = TTIn_ChannelGetSLP;
 	plug->ChannelReleaseSLP = TTIn_ChannelReleaseSLP;
 	plug->ServiceCommand = TTIn_ServiceCommand;
-
-	GF_SAFEALLOC(priv, TTIn);
-	plug->priv = priv;
 	return plug;
 }
 
 void DeleteTTReader(void *ifce)
 {
 	TTIn *tti;
-        GF_InputService *plug = (GF_InputService *) ifce;
-        if (!plug)
-          return;
-        tti = (TTIn *)plug->priv;
-        if (tti){
-          TTIn_CloseService(plug);
-          gf_free(tti);
-        }
-        plug->priv = NULL;
+	GF_InputService *plug = (GF_InputService *) ifce;
+	if (!plug)
+		return;
+	tti = (TTIn *)plug->priv;
+	if (tti) {
+		TTIn_CloseService(plug);
+		gf_free(tti);
+	}
+	plug->priv = NULL;
 	gf_free(plug);
 }
 

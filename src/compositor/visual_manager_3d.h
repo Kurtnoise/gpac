@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -30,17 +30,23 @@
 
 #ifndef GPAC_DISABLE_3D
 
- /*
- *	Visual 3D functions
- */
+//lowering down number of glClips, only used for non window-aligned clip planes, otherwise scisor test used
+#define GF_MAX_GL_CLIPS	2
+#define GF_MAX_GL_LIGHTS 4
+
+/*
+*	Visual 3D functions
+*/
 
 /*draw frame, performing collisions, camera displacement and drawing*/
 Bool visual_3d_draw_frame(GF_VisualManager *visual, GF_Node *root, GF_TraverseState *tr_state, Bool is_root_visual);
 
+Bool visual_3d_setup_ray(GF_VisualManager *visual, GF_TraverseState *tr_state, s32 ix, s32 iy);
+
 /*traverse the scene and picks the node under the current ray, if any*/
 void visual_3d_pick_node(GF_VisualManager *visual, GF_TraverseState *tr_state, GF_Event *ev, GF_ChildNodeItem *children);
 
-/*checks a bounding box against the visual frustum. Returns true if box is visible, false otherwise. 
+/*checks a bounding box against the visual frustum. Returns true if box is visible, false otherwise.
 The cull_flag of the traversing state is updated to the box/frustum relation (in/out/intersect)*/
 Bool visual_3d_node_cull(GF_TraverseState *tr_state, GF_BBox *bbox, Bool skip_near);
 
@@ -74,25 +80,24 @@ void visual_3d_draw_2d(Drawable *st, GF_TraverseState *tr_state);
 #endif
 
 
-/*sets 2D strike aspect 
+/*sets 2D strike aspect
 	- exported for text drawing*/
 void visual_3d_set_2d_strike(GF_TraverseState *tr_state, DrawAspect2D *asp);
 /*sets 3D material. Returns false is object is not visible due to appearance
 	- exported for text drawing*/
 Bool visual_3d_setup_appearance(GF_TraverseState *tr_state);
-/*sets 3D texture. Returns true if a texture is found and successfully bound
+/*sets 3D texture. Returns true if a texture is found and successfully bound or no texture found, FALSE otherwise (texture failure)
 	- exported for text drawing*/
 Bool visual_3d_setup_texture(GF_TraverseState *tr_state, Fixed diffuse_alpha);
-/*disables texture 
+/*disables texture
 	- exported for text drawing*/
 void visual_3d_disable_texture(GF_TraverseState *tr_state);
 
-/*check for collisions on a list of nodes, or scene root if list is null
-	- exported for Layer3D - try to harmonize*/
-void visual_3d_check_collisions(GF_TraverseState *tr_state, GF_ChildNodeItem *node_list);
+/*check for collisions on a given node or on a list of nodes*/
+void visual_3d_check_collisions(GF_TraverseState *tr_state, GF_Node *root_node, GF_ChildNodeItem *node_list);
 
-/*init drawing pass - exported for Layer3D 
-	@layer_type: 
+/*init drawing pass - exported for Layer3D
+	@layer_type:
 		0: not a layer
 		1: 3D layer in 3D context, depth clear but no color clear
 		2: 3D layer in 2D context (offscreen rendering), depth and color clear with alpha=0
@@ -103,7 +108,7 @@ void visual_3d_setup_projection(GF_TraverseState *tr_state, Bool is_layer);
 
 
 /*base 3D drawable*/
-typedef struct 
+typedef struct
 {
 	/*3D object for drawable if needed - ALLOCATED BY DEFAULT*/
 	GF_Mesh *mesh;
@@ -119,7 +124,7 @@ void drawable_3d_base_traverse(GF_Node *n, void *rs, Bool is_destroy, void (*bui
 
 void drawable3d_check_focus_highlight(GF_Node *node, GF_TraverseState *tr_state, GF_BBox *orig_bounds);
 
-typedef struct 
+typedef struct
 {
 	/*the directional light*/
 	GF_Node *dlight;
@@ -161,8 +166,28 @@ typedef struct
 #endif
 } Drawable3DContext;
 
+
+typedef struct
+{
+	//0: directional - 1: spot - 2: point
+	u32 type;
+	SFVec3f direction, position, attenuation;
+	Fixed ambientIntensity, intensity, beamWidth, cutOffAngle;
+	SFColor color;
+	GF_Matrix light_mx;
+} GF_LightInfo;
+
+
+typedef struct
+{
+	GF_Plane p;
+	Bool is_2d_clip;
+	GF_Matrix *mx_clipper;
+} GF_ClipInfo;
+
+
 /*
-	till end of file: all 3D specific calls. 
+	till end of file: all 3D specific calls.
 */
 
 /*setup visual (hint & co)*/
@@ -194,40 +219,35 @@ void visual_3d_clear_depth(GF_VisualManager *visual);
 /*turns background state on/off. When on, all quality options are disabled in order to draw as fast as possible*/
 void visual_3d_set_background_state(GF_VisualManager *visual, Bool on);
 
-/*matrix mode types*/
-enum
-{
-	V3D_MATRIX_MODELVIEW,
-	V3D_MATRIX_PROJECTION,
-	V3D_MATRIX_TEXTURE,
-};
-/*set current matrix type*/
-void visual_3d_set_matrix_mode(GF_VisualManager *visual, u32 mat_type);
-/*push matrix stack*/
-void visual_3d_matrix_push(GF_VisualManager *visual);
-/*reset current matrix (identity)*/
-void visual_3d_matrix_reset(GF_VisualManager *visual);
-/*multiply current matrix with given matrix (16 coefs)*/
-void visual_3d_matrix_add(GF_VisualManager *visual, Fixed *mat);
-/*loads given matrix (16 coefs) as current one*/
-void visual_3d_matrix_load(GF_VisualManager *visual, Fixed *mat);
-/*pop matrix stack*/
-void visual_3d_matrix_pop(GF_VisualManager *visual);
+
+void visual_3d_set_texture_matrix(GF_VisualManager *visual, GF_Matrix *mx);
+//depending on platforms / GL rendering mode, the projection matrix is not loaded at each object Draw(). This function is used to notify a change
+//in the projection matrix to force a reload of the camera's projection
+void visual_3d_projection_matrix_modified(GF_VisualManager *visual);
+
 
 /*setup viewport (vp: top-left, width, height)*/
 void visual_3d_set_viewport(GF_VisualManager *visual, GF_Rect vp);
+
 /*setup scissors region (vp: top-left, width, height) - if vp is NULL, disables scissors*/
 void visual_3d_set_scissor(GF_VisualManager *visual, GF_Rect *vp);
 
 /*setup rectangular cliper (clip: top-left, width, height)
-NOTE: 2D clippers can only be set from a 2D context, hence will always take the 4 first GL clip planes.
-In order to allow multiple Layer2D in Layer2D, THERE IS ALWAYS AT MOST ONE 2D CLIPPER USED AT ANY TIME, 
-it is the caller responsability to restore previous 2D clipers*/
-void visual_3d_set_clipper_2d(GF_VisualManager *visual, GF_Rect clip);
+NOTE: 2D clippers can only be set from a 2D context, and will always use glScissor.
+In order to allow multiple Layer2D in Layer2D, THERE IS ALWAYS AT MOST ONE 2D CLIPPER USED AT ANY TIME,
+it is the caller responsability to restore previous 2D clipers
+
+the matrix is not copied, care should be taken to keep it unmodified until the cliper is reset (unless desired otherwise)
+if NULL, no specific clipping transform will be used*/
+void visual_3d_set_clipper_2d(GF_VisualManager *visual, GF_Rect clip, GF_Matrix *mx_at_clipper);
 /*remove 2D clipper*/
 void visual_3d_reset_clipper_2d(GF_VisualManager *visual);
-/*set clipping plane*/
-void visual_3d_set_clip_plane(GF_VisualManager *visual, GF_Plane p);
+
+/*set clipping plane
+the matrix is not copied, care should be taken to keep it unmodified until the cliper is reset (unless desired otherwise)
+if NULL, no specific clipping transform will be used*/
+void visual_3d_set_clip_plane(GF_VisualManager *visual, GF_Plane p, GF_Matrix *mx_at_clipper, Bool is_2d_clip);
+
 /*reset last clipping plane set*/
 void visual_3d_reset_clip_plane(GF_VisualManager *visual);
 
@@ -239,9 +259,7 @@ void visual_3d_mesh_strike(GF_TraverseState *tr_state, GF_Mesh *mesh, Fixed widt
 /*material types*/
 enum
 {
-	/*default material*/
-	V3D_MATERIAL_NONE,
-	V3D_MATERIAL_AMBIENT,
+	V3D_MATERIAL_AMBIENT=0,
 	V3D_MATERIAL_DIFFUSE,
 	V3D_MATERIAL_SPECULAR,
 	V3D_MATERIAL_EMISSIVE,
@@ -261,12 +279,15 @@ void visual_3d_remove_last_light(GF_VisualManager *visual);
 /*disables all lights*/
 void visual_3d_clear_all_lights(GF_VisualManager *visual);
 /*insert spot light - returns 0 if too many lights*/
-Bool visual_3d_add_spot_light(GF_VisualManager *visual, Fixed ambientIntensity, SFVec3f attenuation, Fixed beamWidth, 
-					   SFColor color, Fixed cutOffAngle, SFVec3f direction, Fixed intensity, SFVec3f location);
+Bool visual_3d_add_spot_light(GF_VisualManager *visual, Fixed ambientIntensity, SFVec3f attenuation, Fixed beamWidth,
+                              SFColor color, Fixed cutOffAngle, SFVec3f direction, Fixed intensity, SFVec3f location, GF_Matrix *light_mx);
 /*insert point light - returns 0 if too many lights*/
-Bool visual_3d_add_point_light(GF_VisualManager *visual, Fixed ambientIntensity, SFVec3f attenuation, SFColor color, Fixed intensity, SFVec3f location);
-/*insert directional light - returns 0 if too many lights*/
-Bool visual_3d_add_directional_light(GF_VisualManager *visual, Fixed ambientIntensity, SFColor color, Fixed intensity, SFVec3f direction);
+Bool visual_3d_add_point_light(GF_VisualManager *visual, Fixed ambientIntensity, SFVec3f attenuation, SFColor color, Fixed intensity, SFVec3f location, GF_Matrix *light_mx);
+/*insert directional light - returns 0 if too many lights. If light_mx is null, this is the headlight*/
+Bool visual_3d_add_directional_light(GF_VisualManager *visual, Fixed ambientIntensity, SFColor color, Fixed intensity, SFVec3f direction, GF_Matrix *light_mx);
+
+void visual_3d_has_inactive_light(GF_VisualManager *visual);
+
 /*set fog*/
 void visual_3d_set_fog(GF_VisualManager *visual, const char *type, SFColor color, Fixed density, Fixed visibility);
 /*fill given rect with given color (used for text hilighting only) - context shall not be altered*/
@@ -275,21 +296,9 @@ void visual_3d_fill_rect(GF_VisualManager *visual, GF_Rect rc, SFColorRGBA color
 void visual_3d_point_sprite(GF_VisualManager *visual, Drawable *stack, GF_TextureHandler *txh, GF_TraverseState *tr_state);
 
 /*non-oglES functions*/
-#ifndef GPAC_USE_OGL_ES
-
-/*draws image data:
-	pos_x, pos_y: top-left pos of image
-	width, height: size of image
-	pixelformat: image pixel format
-	data: image data
-	scale_x, scale_y: x & y scale
-*/
-void visual_3d_draw_image(GF_VisualManager *visual, Fixed pos_x, Fixed pos_y, u32 width, u32 height, u32 pixelformat, char *data, Fixed scale_x, Fixed scale_y);
-/*get matrix for the desired mode*/
-void visual_3d_matrix_get(GF_VisualManager *visual, u32 mat_type, Fixed *mat);
+#ifndef GPAC_USE_GLES1X
 /*X3D hatching*/
 void visual_3d_mesh_hatch(GF_TraverseState *tr_state, GF_Mesh *mesh, u32 hatchStyle, SFColor hatchColor);
-
 #endif
 
 
@@ -298,6 +307,8 @@ void visual_3d_draw_bbox(GF_TraverseState *tr_state, GF_BBox *box);
 
 GF_Err visual_3d_init_autostereo(GF_VisualManager *visual);
 void visual_3d_end_auto_stereo_pass(GF_VisualManager *visual);
+
+void visual_3d_init_shaders(GF_VisualManager *visual);
 void visual_3d_reset_graphics(GF_VisualManager *visual);
 
 #endif /*GPAC_DISABLE_3D*/

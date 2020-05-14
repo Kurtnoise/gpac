@@ -30,7 +30,7 @@ SRCS := $(OBJS:.o=.c)
 all: $(PROG)
 
 $(PROG): $(OBJS) 
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(EXTRALIBS) -L../../../bin/gcc -L../../../extra_lib/lib/gcc -lgpac
+	$(CC) -o $@ $(OBJS) $(EXTRALIBS) -L../../../bin/gcc -L../../../extra_lib/lib/gcc -lgpac $(LDFLAGS)
 
 
 %.o: %.c
@@ -49,10 +49,4 @@ depend:
 distclean: clean
 	rm -f Makefile.bak .depend
 
-
-
-# include dependency files if they exist
-#
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+-include .depend

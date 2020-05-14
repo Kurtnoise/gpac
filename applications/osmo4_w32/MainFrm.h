@@ -36,7 +36,7 @@ public:
 // Overrides
 	// ClassWizard generated virtual function overrides
 	//{{AFX_VIRTUAL(CChildView)
-	protected:
+protected:
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	//}}AFX_VIRTUAL
 
@@ -54,10 +54,10 @@ protected:
 
 class CMainFrame : public CFrameWnd
 {
-	
+
 public:
 	CMainFrame();
-protected: 
+protected:
 	DECLARE_DYNAMIC(CMainFrame)
 
 // Attributes
@@ -69,11 +69,11 @@ public:
 // Overrides
 	// ClassWizard generated virtual function overrides
 	//{{AFX_VIRTUAL(CMainFrame)
-	public:
+public:
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	virtual BOOL OnCmdMsg(UINT nID, int nCode, void* pExtra, AFX_CMDHANDLERINFO* pHandlerInfo);
 	virtual BOOL DestroyWindow();
-	protected:
+protected:
 	virtual BOOL OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult);
 	//}}AFX_VIRTUAL
 
@@ -85,7 +85,7 @@ public:
 	virtual void Dump(CDumpContext& dc) const;
 #endif
 
-public:  
+public:
 	CStatusBar  m_wndStatusBar;
 	CToolBar    m_wndToolBar;
 	Sliders m_Sliders;
@@ -94,8 +94,9 @@ public:
 	COptions *m_pOpt;
 	Playlist *m_pPlayList;
 	CChildView *m_pWndView;
-	Bool m_bFullScreen, m_bRestoreFS;
-	u32 m_timer_on;
+	Bool m_bFullScreen;
+	u32 m_RestoreFS;
+	UINT_PTR m_timer_on;
 	CString console_message;
 	CString console_service;
 	GF_Err console_err;
@@ -112,7 +113,7 @@ public:
 	void BuildViewList();
 	void BuildStreamList(Bool reset_ony);
 	void BuildChapterList(Bool reset_ony);
-	void SetProgTimer(Bool bOn);		
+	void SetProgTimer(Bool bOn);
 	void AddSubtitle(const char *fileName, Bool auto_play);
 
 private:
@@ -137,10 +138,10 @@ protected:
 	afx_msg BOOL OnCommand(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnMove(int x, int y);
-	afx_msg LONG OnSetSize(WPARAM wParam, LPARAM lParam);
-	afx_msg LONG OnNavigate(WPARAM wParam, LPARAM lParam);
-	afx_msg LONG Open(WPARAM wParam, LPARAM lParam);
-	afx_msg LONG NewInstanceOpened(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnSetSize(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnNavigate(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT Open(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT NewInstanceOpened(WPARAM wParam, LPARAM lParam);
 
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
@@ -151,7 +152,7 @@ protected:
 	afx_msg void OnKeyDown( UINT nChar, UINT nRepCnt, UINT nFlags );
 	afx_msg void OnKeyUp( UINT nChar, UINT nRepCnt, UINT nFlags );
 	afx_msg void OnDropFiles(HDROP hDropInfo);
-	afx_msg LONG OnConsoleMessage(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnConsoleMessage(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnViewOriginal();
 	afx_msg void OnViewFullscreen();
 	afx_msg void OnArKeep();

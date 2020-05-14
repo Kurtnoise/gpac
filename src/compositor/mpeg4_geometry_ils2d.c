@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -140,9 +140,8 @@ static void ILS2D_Draw(GF_Node *node, GF_TraverseState *tr_state)
 	raster = NULL;
 	end_at = ils2D->coordIndex.count;
 	if (!end_at) end_at = coord->point.count;
-	count = 0;
+
 	col_ind = 0;
-	ind = 0;
 	i=0;
 	path = gf_path_new();
 	while (1) {
@@ -191,7 +190,8 @@ static void ILS2D_Draw(GF_Node *node, GF_TraverseState *tr_state)
 				col = color->color.vals[col_ind+1];
 				linear[1] = GF_COL_ARGB_FIXED(alpha, col.red, col.green, col.blue);
 			}
-			pos[0] = 0; pos[1] = FIX_ONE;
+			pos[0] = 0;
+			pos[1] = FIX_ONE;
 			raster->stencil_set_linear_gradient(grad, start.x, start.y, end.x, end.y);
 			raster->stencil_set_gradient_interpolation(grad, pos, linear, 2);
 		} else {

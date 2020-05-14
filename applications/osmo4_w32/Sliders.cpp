@@ -15,14 +15,13 @@ static char THIS_FILE[] = __FILE__;
 /////////////////////////////////////////////////////////////////////////////
 // Sliders dialog
 
-
 Sliders::Sliders(CWnd* pParent /*=NULL*/)
 	: CDialog(Sliders::IDD, pParent)
 {
 	//{{AFX_DATA_INIT(Sliders)
 	//}}AFX_DATA_INIT
 
-	m_grabbed = 0;
+	m_grabbed = GF_FALSE;
 }
 
 
@@ -47,31 +46,35 @@ END_MESSAGE_MAP()
 /////////////////////////////////////////////////////////////////////////////
 // Sliders message handlers
 
-
-void Sliders::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) 
+void Sliders::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
-	
+
 	Osmo4 *app = GetApp();
 	if (pScrollBar->GetDlgCtrlID() == ID_SLIDER) {
 		switch (nSBCode) {
-		case TB_LINEUP:
-		case TB_LINEDOWN:
 		case TB_PAGEUP:
 		case TB_PAGEDOWN:
-		case TB_THUMBPOSITION:
-		case TB_THUMBTRACK:
+		case TB_LINEUP:
+		case TB_LINEDOWN:
 		case TB_TOP:
 		case TB_BOTTOM:
-			m_grabbed = 1;
+//			m_grabbed = GF_TRUE;
+			break;
+		case TB_THUMBPOSITION:
+		case TB_THUMBTRACK:
+			m_grabbed = GF_TRUE;
 			break;
 		case TB_ENDTRACK:
-			if (!app->can_seek || !app->m_isopen) {
-				m_PosSlider.SetPos(0);
-			} else {
-				u32 seek_to = m_PosSlider.GetPos();
-				app->PlayFromTime(seek_to);
+			if (m_grabbed) {
+				if (!app->can_seek || !app->m_isopen) {
+					m_PosSlider.SetPos(0);
+				} else {
+					u32 range = m_PosSlider.GetRangeMax() - m_PosSlider.GetRangeMin();
+					u32 seek_to = m_PosSlider.GetPos();
+					app->PlayFromTime(seek_to);
+				}
+				m_grabbed = GF_FALSE;
 			}
-			m_grabbed = 0;
 			break;
 		}
 	}
@@ -82,7 +85,7 @@ void Sliders::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	CDialog::OnHScroll(nSBCode, nPos, pScrollBar);
 }
 
-void Sliders::OnSize(UINT nType, int cx, int cy) 
+void Sliders::OnSize(UINT nType, int cx, int cy)
 {
 	CDialog::OnSize(nType, cx, cy);
 
@@ -96,7 +99,13 @@ void Sliders::OnSize(UINT nType, int cx, int cy)
 
 	m_PosSlider.GetClientRect(&rc);
 	rc.right = rc.left + cx - tw;
+	rc.top += 10;
+	rc.bottom += 10;
 	m_PosSlider.SetWindowPos(this, rc.left, rc.top, rc.right, rc.bottom, SWP_NOZORDER | SWP_NOMOVE);
+
+	const UINT nPixelsLength = 24;
+	m_PosSlider.ModifyStyle(0,TBS_FIXEDLENGTH,FALSE);
+	m_PosSlider.SendMessage(TBM_SETTHUMBLENGTH,nPixelsLength,0);
 
 	m_AudioVol.GetClientRect(&rc2);
 	rc2.top = rc2.bottom = cy/2;
@@ -109,13 +118,13 @@ void Sliders::OnSize(UINT nType, int cx, int cy)
 }
 
 /*we sure don't want to close this window*/
-void Sliders::OnClose() 
+void Sliders::OnClose()
 {
 	u32 i = 0;
 	return;
 }
 
-BOOL Sliders::PreTranslateMessage(MSG* pMsg) 
+BOOL Sliders::PreTranslateMessage(MSG* pMsg)
 {
 	if (pMsg->message == WM_KEYDOWN) {
 		GetApp()->m_pMainWnd->SetFocus();
@@ -126,7 +135,7 @@ BOOL Sliders::PreTranslateMessage(MSG* pMsg)
 }
 
 
-BOOL Sliders::OnInitDialog() 
+BOOL Sliders::OnInitDialog()
 {
 	CDialog::OnInitDialog();
 	m_AudioVol.SetRange(0, 100);

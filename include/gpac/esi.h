@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2006-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -29,6 +29,20 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*!
+ *	\file <gpac/esi.h>
+ *	\brief Draft elementary stream interface API used by MP42TS.
+ */
+	
+/*!
+ *	\addtogroup esi_grp ES Interface
+ *	\ingroup media_grp
+ *	\brief Draft elementary stream interface API used by MP42TS.
+ *
+ *This section documents the draft ES interface used by MP42TS to abstract input sources.
+ *	@{
+ */
 
 #include <gpac/tools.h>
 
@@ -40,7 +54,7 @@ enum
 	*/
 	GF_ESI_INPUT_DATA_FLUSH,
 	/*pulls a COMPLETE AU from the stream
-		corresponding parameter: pointer to a GF_ESIPacket to fill. The indut data_len in the packet is used to indicate any padding in bytes
+		corresponding parameter: pointer to a GF_ESIPacket to fill. The input data_len in the packet is used to indicate any padding in bytes
 	*/
 	GF_ESI_INPUT_DATA_PULL,
 	/*releases the currently pulled AU from the stream - AU cannot be pulled after that, unless seek happens
@@ -56,11 +70,11 @@ enum
 enum
 {
 	/*forces a data flush from interface to dest (caller) - used for non-threaded interfaces
-		corresponding parameter: unused
+		corresponding parameter: GF_ESIPacket
 	*/
 	GF_ESI_OUTPUT_DATA_DISPATCH
 };
-	
+
 /*
 	data packet flags
 */
@@ -89,6 +103,9 @@ typedef struct __data_packet_ifce
 	u32 au_sn;
 	/*for packets using ISMACrypt/OMA/3GPP based crypto*/
 	u32 isma_bso;
+
+	char *mpeg2_af_descriptors;
+	u32 mpeg2_af_descriptors_size;
 } GF_ESIPacket;
 
 struct __esi_video_info
@@ -113,7 +130,7 @@ enum
 	GF_ESI_STREAM_WITHOUT_MPEG4_SYSTEMS =	1<<3,
 };
 
-typedef struct __elementary_stream_ifce 
+typedef struct __elementary_stream_ifce
 {
 	/*misc caps of the stream*/
 	u32 caps;
@@ -136,15 +153,12 @@ typedef struct __elementary_stream_ifce
 	u32 bit_rate;
 	/*repeat rate in ms for carrouseling - 0 if no repeat*/
 	u32 repeat_rate;
-	
+
 	char *decoder_config;
 	u32 decoder_config_size;
-	
+
 	/* MPEG-4 SL Config if any*/
 	GF_SLConfig *sl_config;
-
-	struct __esi_video_info info_video;
-	struct __esi_audio_info info_audio;
 
 	/*input ES control from caller*/
 	GF_Err (*input_ctrl)(struct __elementary_stream_ifce *_self, u32 ctrl_type, void *param);
@@ -156,34 +170,11 @@ typedef struct __elementary_stream_ifce
 	/*output user data of interface - usually set during interface setup*/
 	void *output_udta;
 
+	u32 depends_on_stream;
+
 } GF_ESInterface;
 
-typedef struct __service_ifce
-{
-	u32 type;
-
-	/*input service control from caller*/
-	GF_Err (*input_ctrl)(struct __service_ifce *_self, u32 ctrl_type, void *param);
-	/*input user data of interface - usually set by interface owner*/
-	void *input_udta;
-
-	/*output service control of destination*/
-	GF_Err (*output_ctrl)(struct __service_ifce *_self, u32 ctrl_type, void *param);
-	/*output user data of interface - usually set during interface setup*/
-	void *output_udta;
-
-	GF_ESInterface **streams;
-	u32 nb_streams;
-} GF_ServiceInterface;
-
-
-typedef struct __data_io
-{
-	u32 (*read)(struct __data_io *_self, char *buffer, u32 nb_bytes);
-	u32 (*write)(struct __data_io *_self, char *buffer, u32 nb_bytes);
-	void *udta;
-} GF_DataIO;
-
+/*! @} */
 
 #ifdef __cplusplus
 }

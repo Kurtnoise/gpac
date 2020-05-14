@@ -1,25 +1,25 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2009-2012
  *			All rights reserved
  *
- *  This file is part of GPAC / Platinum UPnP module 
+ *  This file is part of GPAC / Platinum UPnP module
  *
  *  GPAC is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  *
  *	----------------------------------------------------------------------------------
@@ -75,8 +75,8 @@ public:
 	GF_Terminal *m_pTerm;
 
 	/*Platinum's UPnP stack*/
-    PLT_UPnP *m_pPlatinum;
-	
+	PLT_UPnP *m_pPlatinum;
+
 	/*GPAC UPnP/DLNA media renderer if loaded*/
 	GPAC_MediaRenderer *m_pMediaRenderer;
 	/*is renderer bound to the script ? If so, events are dispatched to the script's "UPnP" object*/
@@ -114,10 +114,10 @@ public:
 	u32 m_nbJSInstances;
 	JSContext *m_pJSCtx;
 	JSObject *m_pObj;
-	JSClass upnpClass;
-	JSClass upnpDeviceClass;
-	JSClass upnpGenericDeviceClass;
-	JSClass upnpServiceClass;
+	GF_JSClass upnpClass;
+	GF_JSClass upnpDeviceClass;
+	GF_JSClass upnpGenericDeviceClass;
+	GF_JSClass upnpServiceClass;
 
 	GF_List *m_Devices;
 	u32 last_time, upnp_init_time;
@@ -141,6 +141,15 @@ public:
 
 #ifdef GPAC_HAS_SPIDERMONKEY
 SMJS_DECL_FUNC_PROP_GET( upnpservice_getProperty);
+
+#ifdef USE_FFDEV_17
+#define VPASSIGN(__b) __vp.set( __b )
+#define VPGET() (jsval) __vp
+#else
+#define VPASSIGN(__b) *vp = __b
+#define VPGET() *vp
+#endif
+
 #endif
 
 void format_time_string(char *str, Double dur);

@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2005-2012
  *					All rights reserved
  *
@@ -24,18 +24,27 @@
  */
 
 
+#include <gpac/setup.h>
+
 #ifdef GPAC_HAS_MAD
 
 #include <gpac/modules/codec.h>
 #include <gpac/constants.h>
 
-#if defined(_WIN32_WCE) || defined(__SYMBIAN32__)
+#if defined(_WIN32_WCE) || defined(_WIN64) || defined(__SYMBIAN32__)
 #ifndef FPM_DEFAULT
 #define FPM_DEFAULT
 #endif
 #endif
 
-#include "mad.h"
+#include <mad.h>
+
+#if !defined(__GNUC__)
+# if defined(_WIN32_WCE) || defined (WIN32)
+#  pragma comment(lib, "libmad")
+# endif
+#endif
+
 
 typedef struct
 {
@@ -74,9 +83,9 @@ static GF_Err MAD_AttachStream(GF_BaseDecoder *ifcg, GF_ESD *esd)
 	mad_stream_init(&ctx->stream);
 	mad_frame_init(&ctx->frame);
 	mad_synth_init(&ctx->synth);
-	ctx->configured = 1;
+	ctx->configured = GF_TRUE;
 
-	ctx->buffer = gf_malloc(sizeof(char) * 2*MAD_BUFFER_MDLEN);
+	ctx->buffer = (unsigned char*)gf_malloc(sizeof(char) * 2*MAD_BUFFER_MDLEN);
 
 	/*we need a frame to init, so use default values*/
 	ctx->num_samples = 1152;
@@ -84,7 +93,7 @@ static GF_Err MAD_AttachStream(GF_BaseDecoder *ifcg, GF_ESD *esd)
 	ctx->sample_rate = 0;
 	ctx->out_size = 2 * ctx->num_samples * ctx->num_channels;
 	ctx->ES_ID = esd->ESID;
-	ctx->first = 1;
+	ctx->first = GF_TRUE;
 	return GF_OK;
 }
 
@@ -105,7 +114,7 @@ static GF_Err MAD_DetachStream(GF_BaseDecoder *ifcg, u16 ES_ID)
 		mad_frame_finish(&ctx->frame);
 		mad_synth_finish(&ctx->synth);
 	}
-	ctx->configured = 0;
+	ctx->configured = GF_FALSE;
 	return GF_OK;
 }
 static GF_Err MAD_GetCapabilities(GF_BaseDecoder *ifcg, GF_CodecCapability *capability)
@@ -163,7 +172,7 @@ static GF_Err MAD_SetCapabilities(GF_BaseDecoder *ifcg, GF_CodecCapability capab
 	switch (capability.CapCode) {
 	/*reset storage buffer*/
 	case GF_CODEC_WAIT_RAP:
-		ctx->first = 1;
+		ctx->first = GF_TRUE;
 		ctx->len = 0;
 		if (ctx->configured) {
 			mad_stream_finish(&ctx->stream);
@@ -190,12 +199,12 @@ static GF_Err MAD_SetCapabilities(GF_BaseDecoder *ifcg, GF_CodecCapability capab
 	else if (chan < -MAD_F_ONE)				\
 		chan = -MAD_F_ONE;				\
 	ret = chan >> (MAD_F_FRACBITS + 1 - 16);		\
-
+ 
 static GF_Err MAD_ProcessData(GF_MediaDecoder *ifcg,
-		char *inBuffer, u32 inBufferLength,
-		u16 ES_ID,
-		char *outBuffer, u32 *outBufferLength,
-		u8 PaddingBits, u32 mmlevel)
+                              char *inBuffer, u32 inBufferLength,
+                              u16 ES_ID, u32 *CTS,
+                              char *outBuffer, u32 *outBufferLength,
+                              u8 PaddingBits, u32 mmlevel)
 {
 	mad_fixed_t *left_ch, *right_ch, chan;
 	char *ptr;
@@ -206,13 +215,9 @@ static GF_Err MAD_ProcessData(GF_MediaDecoder *ifcg,
 	/*check not using scalabilty*/
 	assert(ctx->ES_ID == ES_ID);
 
-	if (ctx->ES_ID != ES_ID)
-		return GF_BAD_PARAM;
-
 	/*if late or seeking don't decode*/
 	switch (mmlevel) {
 	case GF_CODEC_LEVEL_SEEK:
-	case GF_CODEC_LEVEL_DROP:
 		*outBufferLength = 0;
 		return GF_OK;
 	default:
@@ -225,7 +230,7 @@ static GF_Err MAD_ProcessData(GF_MediaDecoder *ifcg,
 	}
 
 	if (ctx->first) {
-		ctx->first = 0;
+		ctx->first = GF_FALSE;
 		memcpy(ctx->buffer, inBuffer, inBufferLength);
 		ctx->len = inBufferLength;
 		*outBufferLength = 0;
@@ -257,8 +262,8 @@ static GF_Err MAD_ProcessData(GF_MediaDecoder *ifcg,
 	}
 
 	if (ctx->stream.next_frame) {
-		ctx->len = &ctx->buffer[ctx->len] - ctx->stream.next_frame;
-	    memmove(ctx->buffer, ctx->stream.next_frame, ctx->len);
+		ctx->len = (u32) (&ctx->buffer[ctx->len] - ctx->stream.next_frame);
+		memmove(ctx->buffer, ctx->stream.next_frame, ctx->len);
 	}
 
 
@@ -295,7 +300,7 @@ static GF_Err MAD_ProcessData(GF_MediaDecoder *ifcg,
 static const char *MAD_GetCodecName(GF_BaseDecoder *dec)
 {
 	return "MAD " \
-		MAD_VERSION;
+	       MAD_VERSION;
 }
 
 static u32 MAD_CanHandleStream(GF_BaseDecoder *dec, u32 StreamType, GF_ESD *esd, u8 PL)
@@ -321,7 +326,12 @@ GF_BaseDecoder *NewMADDec()
 	MADDec *dec;
 
 	GF_SAFEALLOC(ifce, GF_MediaDecoder);
+	if (!ifce) return NULL;
 	GF_SAFEALLOC(dec, MADDec);
+	if (!dec) {
+		gf_free(ifce);
+		return NULL;
+	}
 	GF_REGISTER_MODULE_INTERFACE(ifce, GF_MEDIA_DECODER_INTERFACE, "MAD Decoder", "gpac distribution")
 	ifce->privateStack = dec;
 
@@ -342,22 +352,22 @@ GF_BaseDecoder *NewMADDec()
 void DeleteMADDec(GF_MediaDecoder *ifcg)
 {
 	MADDec *ctx;
-        if (!ifcg)
-          return;
-        ctx = (MADDec *) ifcg->privateStack;
-        ifcg->privateStack = NULL;
-        if (ctx){
-          if (ctx->configured) {
-		mad_stream_finish(&ctx->stream);
-		mad_frame_finish(&ctx->frame);
-		mad_synth_finish(&ctx->synth);
-          }
-          ctx->configured = 0;
-          ctx->sample_rate = ctx->out_size = ctx->num_samples = 0;
-          ctx->num_channels = 0;
-          gf_free(ctx);
+	if (!ifcg)
+		return;
+	ctx = (MADDec *) ifcg->privateStack;
+	ifcg->privateStack = NULL;
+	if (ctx) {
+		if (ctx->configured) {
+			mad_stream_finish(&ctx->stream);
+			mad_frame_finish(&ctx->frame);
+			mad_synth_finish(&ctx->synth);
+		}
+		ctx->configured = GF_FALSE;
+		ctx->sample_rate = ctx->out_size = ctx->num_samples = 0;
+		ctx->num_channels = 0;
+		gf_free(ctx);
 	}
-        gf_free(ifcg);
+	gf_free(ifcg);
 }
 
 #endif

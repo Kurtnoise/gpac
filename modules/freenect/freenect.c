@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -38,7 +38,7 @@
 #include <gpac/thread.h>
 
 
-#ifndef FREENECT_COUNTS_PER_G
+#if !defined(FREENECT_DEVICE_CAMERA) && defined(FREENECT_FRAME_W)
 #define FREENECT_MINIMAL
 #endif
 
@@ -89,7 +89,7 @@ void Freenect_DepthCallback_RGBD(freenect_device *dev, void *v_depth, uint32_t t
 			}
 		}
 		vcap->depth_sl_header.compositionTimeStamp = timestamp;
-		gf_term_on_sl_packet(vcap->service, vcap->depth_channel, (char *) vcap->depth_buf, vcap->out_depth_size, &vcap->depth_sl_header, GF_OK);
+		gf_service_send_packet(vcap->service, vcap->depth_channel, (char *) vcap->depth_buf, vcap->out_depth_size, &vcap->depth_sl_header, GF_OK);
 	}
 }
 
@@ -101,7 +101,7 @@ void Freenect_DepthCallback_GREY16(freenect_device *dev, void *v_depth, uint32_t
 		memcpy(vcap->depth_buf, v_depth, vcap->out_depth_size);
 
 		vcap->depth_sl_header.compositionTimeStamp = timestamp;
-		gf_term_on_sl_packet(vcap->service, vcap->depth_channel, (char *) vcap->depth_buf, vcap->out_depth_size, &vcap->depth_sl_header, GF_OK);
+		gf_service_send_packet(vcap->service, vcap->depth_channel, (char *) vcap->depth_buf, vcap->out_depth_size, &vcap->depth_sl_header, GF_OK);
 	}
 }
 
@@ -121,7 +121,7 @@ void Freenect_DepthCallback_GREY8(freenect_device *dev, void *v_depth, uint32_t 
 		}
 //		vcap->depth_sl_header.compositionTimeStamp = timestamp;
 		vcap->depth_sl_header.compositionTimeStamp ++;
-		gf_term_on_sl_packet(vcap->service, vcap->depth_channel, (char *) vcap->depth_buf, vcap->out_depth_size, &vcap->depth_sl_header, GF_OK);
+		gf_service_send_packet(vcap->service, vcap->depth_channel, (char *) vcap->depth_buf, vcap->out_depth_size, &vcap->depth_sl_header, GF_OK);
 	}
 }
 
@@ -136,45 +136,45 @@ void Freenect_DepthCallback_ColorGradient(freenect_device *dev, void *v_depth, u
 			int pval = vcap->gamma[depth[i]];
 			int lb = pval & 0xff;
 			switch (pval>>8) {
-				case 0:
-					vcap->depth_buf[3*i+0] = 255;
-					vcap->depth_buf[3*i+1] = 255-lb;
-					vcap->depth_buf[3*i+2] = 255-lb;
-					break;
-				case 1:
-					vcap->depth_buf[3*i+0] = 255;
-					vcap->depth_buf[3*i+1] = lb;
-					vcap->depth_buf[3*i+2] = 0;
-					break;
-				case 2:
-					vcap->depth_buf[3*i+0] = 255-lb;
-					vcap->depth_buf[3*i+1] = 255;
-					vcap->depth_buf[3*i+2] = 0;
-					break;
-				case 3:
-					vcap->depth_buf[3*i+0] = 0;
-					vcap->depth_buf[3*i+1] = 255;
-					vcap->depth_buf[3*i+2] = lb;
-					break;
-				case 4:
-					vcap->depth_buf[3*i+0] = 0;
-					vcap->depth_buf[3*i+1] = 255-lb;
-					vcap->depth_buf[3*i+2] = 255;
-					break;
-				case 5:
-					vcap->depth_buf[3*i+0] = 0;
-					vcap->depth_buf[3*i+1] = 0;
-					vcap->depth_buf[3*i+2] = 255-lb;
-					break;
-				default:
-					vcap->depth_buf[3*i+0] = 0;
-					vcap->depth_buf[3*i+1] = 0;
-					vcap->depth_buf[3*i+2] = 0;
-					break;
+			case 0:
+				vcap->depth_buf[3*i+0] = 255;
+				vcap->depth_buf[3*i+1] = 255-lb;
+				vcap->depth_buf[3*i+2] = 255-lb;
+				break;
+			case 1:
+				vcap->depth_buf[3*i+0] = 255;
+				vcap->depth_buf[3*i+1] = lb;
+				vcap->depth_buf[3*i+2] = 0;
+				break;
+			case 2:
+				vcap->depth_buf[3*i+0] = 255-lb;
+				vcap->depth_buf[3*i+1] = 255;
+				vcap->depth_buf[3*i+2] = 0;
+				break;
+			case 3:
+				vcap->depth_buf[3*i+0] = 0;
+				vcap->depth_buf[3*i+1] = 255;
+				vcap->depth_buf[3*i+2] = lb;
+				break;
+			case 4:
+				vcap->depth_buf[3*i+0] = 0;
+				vcap->depth_buf[3*i+1] = 255-lb;
+				vcap->depth_buf[3*i+2] = 255;
+				break;
+			case 5:
+				vcap->depth_buf[3*i+0] = 0;
+				vcap->depth_buf[3*i+1] = 0;
+				vcap->depth_buf[3*i+2] = 255-lb;
+				break;
+			default:
+				vcap->depth_buf[3*i+0] = 0;
+				vcap->depth_buf[3*i+1] = 0;
+				vcap->depth_buf[3*i+2] = 0;
+				break;
 			}
 		}
 		vcap->depth_sl_header.compositionTimeStamp = timestamp;
-		gf_term_on_sl_packet(vcap->service, vcap->depth_channel, (char *) vcap->depth_buf, vcap->out_depth_size, &vcap->depth_sl_header, GF_OK);
+		gf_service_send_packet(vcap->service, vcap->depth_channel, (char *) vcap->depth_buf, vcap->out_depth_size, &vcap->depth_sl_header, GF_OK);
 	}
 }
 
@@ -183,7 +183,7 @@ void Freenect_RGBCallback(freenect_device *dev, void *rgb, uint32_t timestamp)
 	FreenectIn *vcap = freenect_get_user(dev);
 	if (vcap->color_channel) {
 		vcap->color_sl_header.compositionTimeStamp = timestamp;
-		gf_term_on_sl_packet(vcap->service, vcap->color_channel, (char *) rgb, vcap->out_color_size, &vcap->color_sl_header, GF_OK);
+		gf_service_send_packet(vcap->service, vcap->color_channel, (char *) rgb, vcap->out_color_size, &vcap->color_sl_header, GF_OK);
 	}
 }
 
@@ -294,7 +294,7 @@ GF_Err Freenect_ConnectService(GF_InputService *plug, GF_ClientService *serv, co
 		while (params) {
 			char *sep = (char *) strchr(params, '&');
 			if (sep) sep[0] = 0;
-	
+
 			GF_LOG(GF_LOG_INFO, GF_LOG_MODULE, ("[VideoCapture] Set camera option %s\n", params));
 
 			if (!strnicmp(params, "resolution=", 11)) {
@@ -388,12 +388,12 @@ GF_Err Freenect_ConnectService(GF_InputService *plug, GF_ClientService *serv, co
 	}
 
 	/*ACK connection is OK*/
-	gf_term_on_connect(serv, NULL, GF_OK);
+	gf_service_connect_ack(serv, NULL, GF_OK);
 
 
 	/*setup object descriptor*/
 	od = (GF_ObjectDescriptor *) gf_odf_desc_new(GF_ODF_OD_TAG);
-	
+
 	esd = gf_odf_desc_esd_new(0);
 	esd->slConfig->timestampResolution = 1000;
 	if (!strnicmp(url, "camera://", 9) || !strnicmp(url, "video://", 8) || !strnicmp(url, "kinect://", 8)) {
@@ -412,7 +412,7 @@ GF_Err Freenect_ConnectService(GF_InputService *plug, GF_ClientService *serv, co
 		esd->decoderConfig->streamType = GF_STREAM_AUDIO;
 	}
 	esd->decoderConfig->objectTypeIndication = GPAC_OTI_RAW_MEDIA_STREAM;
-	
+
 	bs = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
 	gf_bs_write_u32(bs, (esd->ESID==2) ? vcap->color_pixel_format : vcap->depth_pixel_format);
 	gf_bs_write_u16(bs, vcap->width);
@@ -423,7 +423,7 @@ GF_Err Freenect_ConnectService(GF_InputService *plug, GF_ClientService *serv, co
 	gf_bs_del(bs);
 
 	gf_list_add(od->ESDescriptors, esd);
-	gf_term_add_media(vcap->service, (GF_Descriptor*)od, 0);
+	gf_service_declare_media(vcap->service, (GF_Descriptor*)od, 0);
 
 	return GF_OK;
 }
@@ -435,7 +435,7 @@ GF_Err Freenect_CloseService(GF_InputService *plug)
 	if (vcap->f_ctx) freenect_shutdown(vcap->f_ctx);
 	vcap->f_ctx = NULL;
 	vcap->f_dev = NULL;
-	gf_term_on_disconnect(vcap->service, NULL, GF_OK);
+	gf_service_disconnect_ack(vcap->service, NULL, GF_OK);
 	return GF_OK;
 }
 
@@ -453,10 +453,13 @@ GF_Err Freenect_ServiceCommand(GF_InputService *plug, GF_NetworkCommand *com)
 	if (!com->base.on_channel) return GF_NOT_SUPPORTED;
 
 	switch (com->command_type) {
-	case GF_NET_CHAN_SET_PULL: return GF_NOT_SUPPORTED;
-	case GF_NET_CHAN_INTERACTIVE: return GF_OK;
+	case GF_NET_CHAN_SET_PULL:
+		return GF_NOT_SUPPORTED;
+	case GF_NET_CHAN_INTERACTIVE:
+		return GF_OK;
 	/*since data is file-based, no padding is needed (decoder plugin will handle it itself)*/
-	case GF_NET_CHAN_SET_PADDING: return GF_OK;
+	case GF_NET_CHAN_SET_PADDING:
+		return GF_OK;
 	case GF_NET_CHAN_BUFFER:
 		com->buffer.max = com->buffer.min = 500;
 		return GF_OK;
@@ -480,11 +483,14 @@ GF_Err Freenect_ServiceCommand(GF_InputService *plug, GF_NetworkCommand *com)
 			}
 		}
 		return GF_OK;
-	case GF_NET_CHAN_CONFIG: return GF_OK;
+	case GF_NET_CHAN_CONFIG:
+		return GF_OK;
 	case GF_NET_CHAN_GET_DSI:
 		com->get_dsi.dsi = NULL;
 		com->get_dsi.dsi_len = 0;
 		return GF_OK;
+	default:
+		break;
 	}
 	return GF_OK;
 }
@@ -493,21 +499,21 @@ GF_Err Freenect_ConnectChannel(GF_InputService *plug, LPNETCHANNEL channel, cons
 {
 	u32 ESID;
 	FreenectIn *vcap = (FreenectIn *) plug->priv;
-	
+
 	sscanf(url, "ES_ID=%u", &ESID);
 	if (ESID == 1) {
 		vcap->depth_channel = channel;
 		memset(&vcap->depth_sl_header, 0, sizeof(GF_SLHeader));
 		vcap->depth_sl_header.compositionTimeStampFlag = 1;
-		gf_term_on_connect(vcap->service, channel, GF_OK);
+		gf_service_connect_ack(vcap->service, channel, GF_OK);
 	} else if (ESID == 2) {
 		vcap->color_channel = channel;
 		memset(&vcap->color_sl_header, 0, sizeof(GF_SLHeader));
 		vcap->color_sl_header.compositionTimeStampFlag = 1;
-		gf_term_on_connect(vcap->service, channel, GF_OK);
+		gf_service_connect_ack(vcap->service, channel, GF_OK);
 	} else {
 		/*TODO*/
-		gf_term_on_connect(vcap->service, channel, GF_STREAM_NOT_FOUND);
+		gf_service_connect_ack(vcap->service, channel, GF_STREAM_NOT_FOUND);
 	}
 	return GF_OK;
 }
@@ -521,7 +527,7 @@ GF_Err Freenect_DisconnectChannel(GF_InputService *plug, LPNETCHANNEL channel)
 	else if (vcap->color_channel == channel) {
 		vcap->color_channel = NULL;
 	}
-	gf_term_on_disconnect(vcap->service, channel, GF_OK);
+	gf_service_disconnect_ack(vcap->service, channel, GF_OK);
 	return GF_OK;
 }
 
@@ -531,8 +537,8 @@ Bool Freenect_CanHandleURLInService(GF_InputService *plug, const char *url)
 }
 
 
-GF_EXPORT
-const u32 *QueryInterfaces() 
+GPAC_MODULE_EXPORT
+const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
 		GF_NET_CLIENT_INTERFACE,
@@ -541,7 +547,7 @@ const u32 *QueryInterfaces()
 	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	if (InterfaceType == GF_NET_CLIENT_INTERFACE) {
@@ -564,11 +570,11 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 		GF_SAFEALLOC(vcap, FreenectIn);
 		plug->priv = vcap;
 		return (GF_BaseInterface *)plug;
-	} 
+	}
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *bi)
 {
 	if (bi->InterfaceType==GF_NET_CLIENT_INTERFACE) {
@@ -583,4 +589,5 @@ void ShutdownInterface(GF_BaseInterface *bi)
 	}
 }
 
+GPAC_MODULE_STATIC_DECLARATION( freenect )
 

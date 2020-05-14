@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -43,6 +43,7 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 	backup = gf_node_dirty_get(node);
 	if (backup & GF_SG_CHILD_DIRTY) {
 		GF_SensorHandler *hsens;
+		Bool check_anchor=0;
 		u32 ntag = gf_node_get_tag(node);
 		group->flags &= ~GROUP_HAS_SENSORS;
 		if (group->sensors) gf_list_reset(group->sensors);
@@ -53,11 +54,11 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 		but still mark the group as empty*/
 		group->bounds.width = 0;
 		/*special case for anchor which is a parent node acting as a sensor*/
-		if ((ntag==TAG_MPEG4_Anchor) 
+		if (ntag==TAG_MPEG4_Anchor) check_anchor=1;
 #ifndef GPAC_DISABLE_X3D
-			|| (ntag==TAG_X3D_Anchor)
+		else if (ntag==TAG_X3D_Anchor) check_anchor=1;
 #endif
-		) {
+		if (check_anchor) {
 			GF_SensorHandler *gf_sc_anchor_get_handler(GF_Node *n);
 
 			hsens = gf_sc_anchor_get_handler(node);
@@ -69,7 +70,7 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 		} else {
 			child = ((GF_ParentNode *)node)->children;
 			while (child) {
-				hsens = compositor_mpeg4_get_sensor_handler(child->node);
+				hsens = compositor_mpeg4_get_sensor_handler_ex(child->node, GF_TRUE);
 				if (hsens) {
 					if (!group->sensors) group->sensors = gf_list_new();
 					gf_list_add(group->sensors, hsens);
@@ -92,7 +93,7 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 
 	/*now here is the trick: ExternProtos may not be loaded at this point, in which case we can't
 	perform proper culling. Unloaded ExternProto signal themselves by invalidating their parent
-	graph to get a new traversal. We must therefore reset the CHILD_DIRTY flag before computing 
+	graph to get a new traversal. We must therefore reset the CHILD_DIRTY flag before computing
 	bounds otherwise we'll never re-invalidate the subgraph anymore*/
 	gf_node_dirty_clear(node, GF_SG_CHILD_DIRTY);
 
@@ -122,13 +123,13 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 		tr_state->bounds.width = tr_state->bounds.height = 0;
 #ifndef GPAC_DISABLE_3D
 		tr_state->bbox.is_set = 0;
-#endif		
+#endif
 		while (child) {
 			gf_node_traverse(child->node, tr_state);
 			if (tr_state->disable_cull) {
 				group->flags |= GROUP_SKIP_CULLING;
 				tr_state->disable_cull = 0;
-			} 
+			}
 			/*handle 3D nodes in 2D groups*/
 #ifndef GPAC_DISABLE_3D
 			if (tr_state->bbox.is_set) {
@@ -143,7 +144,7 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 
 		tr_state->bounds = group->bounds;
 
-		if (group->flags & GROUP_SKIP_CULLING) 
+		if (group->flags & GROUP_SKIP_CULLING)
 			tr_state->disable_cull = 1;
 		tr_state->text_split_mode = backup;
 	}
@@ -169,10 +170,10 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 			gf_node_traverse(child->node, tr_state);
 			child = child->next;
 #ifdef GF_SR_USE_VIDEO_CACHE
-			if (tr_state->cache_too_small) 
+			if (tr_state->cache_too_small)
 				cache_too_small++;
 #endif
-		} 
+		}
 
 		tr_state->invalidate_all = prev_inv;
 
@@ -180,7 +181,7 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 		if (cache_too_small) {
 			tr_state->cache_too_small = 1;
 		} else {
-			/*get the traversal time for each group*/	
+			/*get the traversal time for each group*/
 			traverse_time = gf_sys_clock() - traverse_time;
 			group->traverse_time += traverse_time;
 			/*record the traversal information and turn cache on if possible*/
@@ -195,7 +196,7 @@ void group_2d_traverse(GF_Node *node, GroupingNode2D *group, GF_TraverseState *t
 		while (child) {
 			gf_node_traverse(child->node, tr_state);
 			child = child->next;
-		} 
+		}
 
 	}
 
@@ -220,16 +221,17 @@ void group_2d_traverse_with_order(GF_Node *node, GroupingNode2D *group, GF_Trave
 	backup = gf_node_dirty_get(node);
 	if (backup & GF_SG_CHILD_DIRTY) {
 		GF_SensorHandler *hsens;
+		Bool check_anchor=0;
 		/*never trigger bounds recompute in 2D since we don't cull 2D groups*/
 		u32 ntag = gf_node_get_tag(node);
 		group->flags &= ~GROUP_HAS_SENSORS;
 		drawable_reset_group_highlight(tr_state, node);
 		/*special case for anchor which is a parent node acting as a sensor*/
-		if ((ntag==TAG_MPEG4_Anchor) 
+		if (ntag==TAG_MPEG4_Anchor) check_anchor=1;
 #ifndef GPAC_DISABLE_X3D
-			|| (ntag==TAG_X3D_Anchor)
+		else if (ntag==TAG_X3D_Anchor) check_anchor=1;
 #endif
-		) {
+		if (check_anchor) {
 			GF_SensorHandler *gf_sc_anchor_get_handler(GF_Node *n);
 
 			hsens = gf_sc_anchor_get_handler(node);
@@ -241,7 +243,7 @@ void group_2d_traverse_with_order(GF_Node *node, GroupingNode2D *group, GF_Trave
 		} else {
 			list = ((GF_ParentNode *)node)->children;
 			while (list) {
-				hsens = compositor_mpeg4_get_sensor_handler(list->node);
+				hsens = compositor_mpeg4_get_sensor_handler_ex(list->node, GF_TRUE);
 				if (hsens) {
 					if (!group->sensors) group->sensors = gf_list_new();
 					gf_list_add(group->sensors, hsens);
@@ -263,7 +265,7 @@ void group_2d_traverse_with_order(GF_Node *node, GroupingNode2D *group, GF_Trave
 
 	/*now here is the trick: ExternProtos may not be loaded at this point, in which case we can't
 	perform proper culling. Unloaded ExternProto signal themselves by invalidating their parent
-	graph to get a new traversal. We must therefore reset the CHILD_DIRTY flag before computing 
+	graph to get a new traversal. We must therefore reset the CHILD_DIRTY flag before computing
 	bounds otherwise we'll never re-invalidate the subgraph anymore*/
 	gf_node_dirty_clear(node, GF_SG_CHILD_DIRTY);
 
@@ -289,7 +291,7 @@ void group_2d_traverse_with_order(GF_Node *node, GroupingNode2D *group, GF_Trave
 		tr_state->bounds.width = tr_state->bounds.height = 0;
 #ifndef GPAC_DISABLE_3D
 		tr_state->bbox.is_set = 0;
-#endif		
+#endif
 		count = gf_node_list_get_count(list);
 		for (i=0; i<count; i++) {
 			child = gf_node_list_get_child(list, positions[i]);
@@ -297,7 +299,7 @@ void group_2d_traverse_with_order(GF_Node *node, GroupingNode2D *group, GF_Trave
 			if (tr_state->disable_cull) {
 				group->flags |= GROUP_SKIP_CULLING;
 				tr_state->disable_cull = 0;
-			} 
+			}
 			/*handle 3D nodes in 2D groups*/
 #ifndef GPAC_DISABLE_3D
 			if (tr_state->bbox.is_set) {
@@ -310,11 +312,11 @@ void group_2d_traverse_with_order(GF_Node *node, GroupingNode2D *group, GF_Trave
 		}
 		tr_state->bounds = group->bounds;
 
-		if (group->flags & GROUP_SKIP_CULLING) 
+		if (group->flags & GROUP_SKIP_CULLING)
 			tr_state->disable_cull = 1;
 		tr_state->text_split_mode = backup;
 
-	/*TRAVERSE_SORT */
+		/*TRAVERSE_SORT */
 	} else if (tr_state->traversing_mode==TRAVERSE_SORT) {
 		Bool prev_inv = tr_state->invalidate_all;
 #ifdef GF_SR_USE_VIDEO_CACHE
@@ -337,17 +339,17 @@ void group_2d_traverse_with_order(GF_Node *node, GroupingNode2D *group, GF_Trave
 			child = gf_node_list_get_child(list, positions[i]);
 			gf_node_traverse(child, tr_state);
 #ifdef GF_SR_USE_VIDEO_CACHE
-			if (tr_state->cache_too_small) 
+			if (tr_state->cache_too_small)
 				cache_too_small++;
 #endif
-		} 
+		}
 		tr_state->invalidate_all = prev_inv;
 
 #ifdef GF_SR_USE_VIDEO_CACHE
 		if (cache_too_small) {
 			tr_state->cache_too_small = 1;
 		} else {
-			/*get the traversal time for each group*/	
+			/*get the traversal time for each group*/
 			traverse_time = gf_sys_clock() - traverse_time;
 			group->traverse_time += traverse_time;
 			/*record the traversal information and turn cache on if possible*/
@@ -362,7 +364,7 @@ void group_2d_traverse_with_order(GF_Node *node, GroupingNode2D *group, GF_Trave
 		for (i=0; i<count; i++) {
 			child = gf_node_list_get_child(list, positions[i]);
 			gf_node_traverse(child, tr_state);
-		} 
+		}
 	}
 
 	if (sensor_backup) {
@@ -401,15 +403,15 @@ GroupingNode *group_3d_new(GF_Node *node)
 static u32 get_light_type(GF_Node *n)
 {
 	switch (gf_node_get_tag(n)) {
-	case TAG_MPEG4_DirectionalLight: 
+	case TAG_MPEG4_DirectionalLight:
 #ifndef GPAC_DISABLE_X3D
-	case TAG_X3D_DirectionalLight: 
+	case TAG_X3D_DirectionalLight:
 #endif
 		return 2;
 	case TAG_MPEG4_PointLight:
 	case TAG_MPEG4_SpotLight:
 		return 1;
-	default: 
+	default:
 		return 0;
 	}
 }
@@ -424,6 +426,12 @@ void group_3d_traverse(GF_Node *node, GroupingNode *group, GF_TraverseState *tr_
 	GF_ChildNodeItem *l;
 
 	if (gf_node_dirty_get(node) & GF_SG_CHILD_DIRTY) {
+		//we are drawing 3D object but configured for 2D, force 3D
+		if (!tr_state->visual->type_3d && tr_state->visual->compositor->hybrid_opengl) {
+			tr_state->visual->compositor->root_visual_setup=0;
+			tr_state->visual->compositor->force_type_3d=1;
+		}
+		
 		/*need to recompute bounds*/
 		if (tr_state->traversing_mode!=TRAVERSE_GET_BOUNDS) {
 			/*traverse subtree to recompute bounds*/
@@ -440,27 +448,25 @@ void group_3d_traverse(GF_Node *node, GroupingNode *group, GF_TraverseState *tr_
 			/*special case for anchor which is a parent node acting as a sensor*/
 			if ((ntag==TAG_MPEG4_Anchor)
 #ifndef GPAC_DISABLE_X3D
-				|| (ntag==TAG_X3D_Anchor)
+			        || (ntag==TAG_X3D_Anchor)
 #endif
-				) group->flags |= GROUP_HAS_SENSORS;
+			   ) group->flags |= GROUP_HAS_SENSORS;
 
 			l = ((GF_ParentNode*)node)->children;
 			while (l) {
-				hsens = compositor_mpeg4_get_sensor_handler(l->node);
+				hsens = compositor_mpeg4_get_sensor_handler_ex(l->node, GF_TRUE);
 				if (hsens) {
 					group->flags |= GROUP_HAS_SENSORS;
-					break;
 				}
 				else if (get_light_type(l->node)) {
 					group->flags |= GROUP_HAS_LIGHTS;
-					break;
 				}
 				l = l->next;
 			}
 
 			/*now here is the trick: ExternProtos may not be loaded at this point, in which case we can't
 			perform proper culling. Unloaded ExternProto signal themselves by invalidating their parent
-			graph to get a new traversal. We must therefore reset the CHILD_DIRTY flag before computing 
+			graph to get a new traversal. We must therefore reset the CHILD_DIRTY flag before computing
 			bounds otherwise we'll never re-invalidate the subgraph anymore*/
 			gf_node_dirty_clear(node, GF_SG_CHILD_DIRTY);
 		}
@@ -477,16 +483,16 @@ void group_3d_traverse(GF_Node *node, GroupingNode *group, GF_TraverseState *tr_
 
 	mode_back=tr_state->cull_flag;
 	/*if culling not disabled*/
-	if (!(group->flags & GROUP_SKIP_CULLING) 
-		/*for geometry AND lights*/
-		&& (tr_state->traversing_mode==TRAVERSE_SORT) 
-		/*do cull*/
-		&& !visual_3d_node_cull(tr_state, &group->bbox, 0)) {
+	if (!(group->flags & GROUP_SKIP_CULLING)
+	        /*for geometry AND lights*/
+	        && (tr_state->traversing_mode==TRAVERSE_SORT)
+	        /*do cull*/
+	        && !visual_3d_node_cull(tr_state, &group->bbox, 0)) {
 
 		tr_state->cull_flag = mode_back;
 		return;
 	}
-	
+
 
 	/*picking: collect sensors*/
 	sensor_backup = NULL;
@@ -497,8 +503,8 @@ void group_3d_traverse(GF_Node *node, GroupingNode *group, GF_TraverseState *tr_
 
 		l = ((GF_ParentNode*)node)->children;
 		while (l) {
-			hsens = compositor_mpeg4_get_sensor_handler(l->node);
-			if (hsens && hsens->IsEnabled(l->node)) 
+			hsens = compositor_mpeg4_get_sensor_handler_ex(l->node, GF_TRUE);
+			if (hsens && hsens->IsEnabled(l->node))
 				gf_list_add(tr_state->vrml_sensors, hsens);
 
 			l = l->next;
@@ -539,7 +545,7 @@ void group_3d_traverse(GF_Node *node, GroupingNode *group, GF_TraverseState *tr_
 		}
 	}
 
-		
+
 	if (tr_state->traversing_mode==TRAVERSE_GET_BOUNDS) {
 		l = ((GF_ParentNode*)node)->children;
 		split_text_backup = tr_state->text_split_mode;
@@ -553,7 +559,7 @@ void group_3d_traverse(GF_Node *node, GroupingNode *group, GF_TraverseState *tr_
 			if (tr_state->disable_cull) {
 				group->flags |= GROUP_SKIP_CULLING;
 				tr_state->disable_cull = 0;
-			} 
+			}
 			/*handle 2D nodes in 3D groups*/
 			if (tr_state->bounds.width) {
 				gf_bbox_from_rect(&tr_state->bbox, &tr_state->bounds);
@@ -567,7 +573,7 @@ void group_3d_traverse(GF_Node *node, GroupingNode *group, GF_TraverseState *tr_
 			l = l->next;
 		}
 		tr_state->bbox = group->bbox;
-		if (group->flags & GROUP_SKIP_CULLING) 
+		if (group->flags & GROUP_SKIP_CULLING)
 			tr_state->disable_cull = 1;
 		tr_state->text_split_mode = split_text_backup;
 	} else {
@@ -577,7 +583,7 @@ void group_3d_traverse(GF_Node *node, GroupingNode *group, GF_TraverseState *tr_
 			l = l->next;
 		}
 
-		if (tr_state->traversing_mode==TRAVERSE_SORT) 
+		if (tr_state->traversing_mode==TRAVERSE_SORT)
 			drawable3d_check_focus_highlight(node, tr_state, NULL);
 	}
 	tr_state->cull_flag = mode_back;
@@ -643,6 +649,10 @@ void parent_node_start_group(ParentNode2D *group, GF_Node *n, Bool discardable)
 		n = cg->child;
 	}
 	GF_SAFEALLOC(cg, ChildGroup);
+	if (!cg) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate child group\n"));
+		return;
+	}
 	cg->child = n;
 	cg->text_type = discardable;
 	gf_list_add(group->groups, cg);
@@ -677,20 +687,22 @@ void parent_node_traverse(GF_Node *node, ParentNode2D *group, GF_TraverseState *
 	GF_ChildNodeItem *l;
 
 	if (gf_node_dirty_get(node) & GF_SG_CHILD_DIRTY) {
+		Bool check_anchor=0;
 		/*parent groups must recompute their bounds themselves since they modify children layout*/
 		u32 ntag = gf_node_get_tag(node);
 		group->flags &= ~GROUP_HAS_SENSORS;
 		/*special case for anchor which is a parent node acting as a sensor*/
-		if ((ntag==TAG_MPEG4_Anchor) 
+		if (ntag==TAG_MPEG4_Anchor) check_anchor=1;
 #ifndef GPAC_DISABLE_X3D
-			|| (ntag==TAG_X3D_Anchor)
+		else if (ntag==TAG_X3D_Anchor) check_anchor=1;
 #endif
-		) {
+		if (check_anchor) {
 			group->flags |= GROUP_HAS_SENSORS | GROUP_IS_ANCHOR;
 		} else {
 			l = ((GF_ParentNode *)node)->children;
 			while (l) {
-				if (compositor_mpeg4_is_sensor_node(l->node)) {
+				GF_SensorHandler *hsens = compositor_mpeg4_get_sensor_handler_ex(l->node, GF_TRUE);
+				if (hsens) {
 					group->flags |= GROUP_HAS_SENSORS;
 					break;
 				}
@@ -700,14 +712,14 @@ void parent_node_traverse(GF_Node *node, ParentNode2D *group, GF_TraverseState *
 
 		/*now here is the trick: ExternProtos may not be loaded at this point, in which case we can't
 		perform proper culling. Unloaded ExternProto signal themselves by invalidating their parent
-		graph to get a new traversal. We must therefore reset the CHILD_DIRTY flag before computing 
+		graph to get a new traversal. We must therefore reset the CHILD_DIRTY flag before computing
 		bounds otherwise we'll never re-invalidate the subgraph anymore*/
 		gf_node_dirty_clear(node, GF_SG_CHILD_DIRTY);
 	}
 	gf_node_dirty_clear(node, GF_SG_NODE_DIRTY);
 
 	/*no culling in 2D*/
-	
+
 	/*picking: collect sensors*/
 	sensor_backup = NULL;
 	if ((tr_state->traversing_mode==TRAVERSE_PICK) && (group->flags & GROUP_HAS_SENSORS) ) {
@@ -720,7 +732,7 @@ void parent_node_traverse(GF_Node *node, ParentNode2D *group, GF_TraverseState *
 		/*add sensor(s) to traversing state*/
 		l = ((GF_ParentNode *)node)->children;
 		while (l) {
-			hsens = compositor_mpeg4_get_sensor_handler(l->node);
+			hsens = compositor_mpeg4_get_sensor_handler_ex(l->node, GF_TRUE);
 			if (hsens) gf_list_add(tr_state->vrml_sensors, hsens);
 			l = l->next;
 		}
@@ -733,14 +745,14 @@ void parent_node_traverse(GF_Node *node, ParentNode2D *group, GF_TraverseState *
 	tr_state->bounds.width = tr_state->bounds.height = 0;
 #ifndef GPAC_DISABLE_3D
 	tr_state->bbox.is_set = 0;
-#endif	
+#endif
 
 	l = ((GF_ParentNode *)node)->children;
 	while (l) {
 		parent_node_start_group(group, l->node, 0);
-		
+
 		tr_state->bounds.width = tr_state->bounds.height = 0;
-	
+
 		gf_node_traverse(l->node, tr_state);
 
 		/*handle 3D nodes in 2D groups*/
@@ -766,7 +778,7 @@ void parent_node_traverse(GF_Node *node, ParentNode2D *group, GF_TraverseState *
 void parent_node_child_traverse(ChildGroup *cg, GF_TraverseState *tr_state)
 {
 	Fixed dx, dy;
-		
+
 	dx = cg->final.x - cg->original.x + cg->scroll_x;
 	dy = cg->final.y - cg->original.y + cg->scroll_y;
 	tr_state->text_split_idx = cg->text_split_idx;
@@ -777,20 +789,9 @@ void parent_node_child_traverse(ChildGroup *cg, GF_TraverseState *tr_state)
 
 		gf_mx_copy(mx_bckup, tr_state->model_matrix);
 		gf_mx_add_translation(&tr_state->model_matrix, dx, dy, 0);
-
-		if (tr_state->traversing_mode==TRAVERSE_SORT) {
-			GF_Matrix mx;
-			gf_mx_init(mx);
-			gf_mx_add_translation(&mx, dx, dy, 0);
-			visual_3d_matrix_push(tr_state->visual);
-			visual_3d_matrix_add(tr_state->visual, mx.m);
-			gf_node_traverse(cg->child, tr_state);
-			visual_3d_matrix_pop(tr_state->visual);
-		} else {
-			gf_node_traverse(cg->child, tr_state);
-		}
+		gf_node_traverse(cg->child, tr_state);
 		gf_mx_copy(tr_state->model_matrix, mx_bckup);
-	} else 
+	} else
 #endif
 	{
 		GF_Matrix2D mx2d;
@@ -807,7 +808,7 @@ void parent_node_child_traverse(ChildGroup *cg, GF_TraverseState *tr_state)
 void parent_node_child_traverse_matrix(ChildGroup *cg, GF_TraverseState *tr_state, GF_Matrix2D *mat2D)
 {
 	if (!mat2D) return;
-	
+
 	tr_state->text_split_idx = cg->text_split_idx;
 #ifndef GPAC_DISABLE_3D
 	if (tr_state->visual->type_3d) {
@@ -815,16 +816,9 @@ void parent_node_child_traverse_matrix(ChildGroup *cg, GF_TraverseState *tr_stat
 		gf_mx_from_mx2d(&mx, mat2D);
 		gf_mx_copy(mx_bckup, tr_state->model_matrix);
 		gf_mx_add_matrix(&tr_state->model_matrix, &mx);
-		if (tr_state->traversing_mode==TRAVERSE_SORT) {
-			visual_3d_matrix_push(tr_state->visual);
-			visual_3d_matrix_add(tr_state->visual, mx.m);
-			gf_node_traverse(cg->child, tr_state);
-			visual_3d_matrix_pop(tr_state->visual);
-		} else {
-			gf_node_traverse(cg->child, tr_state);
-		}
+		gf_node_traverse(cg->child, tr_state);
 		gf_mx_copy(tr_state->model_matrix, mx_bckup);
-	} else 
+	} else
 #endif
 	{
 		GF_Matrix2D mx2d;

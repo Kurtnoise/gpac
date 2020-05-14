@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -26,15 +26,24 @@
 #include "ogg_in.h"
 
 
+#if !defined(__GNUC__)
+# if (defined(_WIN32_WCE) || defined (WIN32))
+#  pragma comment(lib, "libogg_static")
+#  pragma comment(lib, "libvorbis_static")
+#  pragma comment(lib, "libtheora_static")
+# endif
+#endif
+
+
 static u32 OGG_CanHandleStream(GF_BaseDecoder *dec, u32 StreamType, GF_ESD *esd, u8 PL)
 {
+	/*media type query*/
+	if (!esd) return ((StreamType == GF_STREAM_VISUAL) || (StreamType == GF_STREAM_AUDIO)) ? GF_CODEC_STREAM_TYPE_SUPPORTED : GF_CODEC_NOT_SUPPORTED;
 	/*video decs*/
 	if (StreamType == GF_STREAM_VISUAL) {
-		char *dsi;
-		/*media type query*/
-		if (!esd) return GF_CODEC_STREAM_TYPE_SUPPORTED;
-		dsi = esd->decoderConfig->decoderSpecificInfo ? esd->decoderConfig->decoderSpecificInfo->data : NULL;
-		
+#ifdef GPAC_HAS_THEORA
+		char *dsi = esd->decoderConfig->decoderSpecificInfo ? esd->decoderConfig->decoderSpecificInfo->data : NULL;
+#endif
 		switch (esd->decoderConfig->objectTypeIndication) {
 #ifdef GPAC_HAS_THEORA
 		case GPAC_OTI_MEDIA_OGG:
@@ -43,17 +52,15 @@ static u32 OGG_CanHandleStream(GF_BaseDecoder *dec, u32 StreamType, GF_ESD *esd,
 			}
 			return GF_CODEC_NOT_SUPPORTED;
 #endif
-		default: 
+		default:
 			return GF_CODEC_NOT_SUPPORTED;
 		}
 	}
 	/*audio decs*/
 	if (StreamType == GF_STREAM_AUDIO) {
-		char *dsi;
-		/*media type query*/
-		if (!esd) return GF_CODEC_STREAM_TYPE_SUPPORTED;
-		dsi = esd->decoderConfig->decoderSpecificInfo ? esd->decoderConfig->decoderSpecificInfo->data : NULL;
-
+#ifdef GPAC_HAS_VORBIS
+		char *dsi = esd->decoderConfig->decoderSpecificInfo ? esd->decoderConfig->decoderSpecificInfo->data : NULL;
+#endif
 		switch (esd->decoderConfig->objectTypeIndication) {
 #ifdef GPAC_HAS_VORBIS
 		case GPAC_OTI_MEDIA_OGG:
@@ -62,7 +69,7 @@ static u32 OGG_CanHandleStream(GF_BaseDecoder *dec, u32 StreamType, GF_ESD *esd,
 			}
 			return GF_CODEC_NOT_SUPPORTED;
 #endif
-		default: 
+		default:
 			return GF_CODEC_NOT_SUPPORTED;
 		}
 	}
@@ -75,7 +82,12 @@ GF_BaseDecoder *OGG_LoadDecoder()
 	GF_MediaDecoder *ifce;
 	OGGWraper *wrap;
 	GF_SAFEALLOC(ifce, GF_MediaDecoder);
+	if (!ifce) return NULL;
 	GF_SAFEALLOC(wrap, OGGWraper);
+	if (!wrap) {
+		gf_free(ifce);
+		return NULL;
+	}
 	ifce->privateStack = wrap;
 	ifce->CanHandleStream = OGG_CanHandleStream;
 	GF_REGISTER_MODULE_INTERFACE(ifce, GF_MEDIA_DECODER_INTERFACE, "GPAC XIPH.org package", "gpac distribution")
@@ -87,28 +99,32 @@ GF_BaseDecoder *OGG_LoadDecoder()
 void DeleteOGGDecoder(GF_BaseDecoder *ifcd)
 {
 	OGGWraper *wrap;
-        if (!ifcd)
-          return;
-        wrap = (OGGWraper *)ifcd->privateStack;
-        if (!wrap){
-          switch (wrap->type) {
+	if (!ifcd)
+		return;
+	wrap = (OGGWraper *)ifcd->privateStack;
+	if (wrap) {
+		switch (wrap->type) {
 #ifdef GPAC_HAS_VORBIS
-            case OGG_VORBIS: DeleteVorbisDecoder(ifcd); break;
+		case OGG_VORBIS:
+			DeleteVorbisDecoder(ifcd);
+			break;
 #endif
 #ifdef GPAC_HAS_THEORA
-            case OGG_THEORA: DeleteTheoraDecoder(ifcd); break;
+		case OGG_THEORA:
+			DeleteTheoraDecoder(ifcd);
+			break;
 #endif
-            default:
-		break;
-          }
-          gf_free(wrap);
-          ifcd->privateStack = NULL;
-        }
+		default:
+			break;
+		}
+		gf_free(wrap);
+		ifcd->privateStack = NULL;
+	}
 	gf_free(ifcd);
 }
 
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
@@ -121,7 +137,7 @@ const u32 *QueryInterfaces()
 	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 #if !defined(GPAC_DISABLE_AV_PARSERS) && !defined(GPAC_DISABLE_OGG)
@@ -131,7 +147,7 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -145,3 +161,5 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 		break;
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( ogg_in )

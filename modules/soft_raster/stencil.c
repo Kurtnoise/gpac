@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,16 +11,16 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
- *		
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
  */
 
 #include "rast_soft.h"
@@ -32,16 +32,16 @@ EVGStencil *evg_radial_gradient_brush();
 
 
 
-GF_Color color_interpolate(u32 a, u32 b, u8 pos) 
-{ 
+GF_Color color_interpolate(u32 a, u32 b, u8 pos)
+{
 	u32 ca = ((a>>24)     )*(u32)(0xFF-pos)+((b>>24)     )*(u32)pos;
 	u32 cr = ((a>>16)&0xFF)*(u32)(0xFF-pos)+((b>>16)&0xFF)*(u32)pos;
 	u32 cg = ((a>> 8)&0xFF)*(u32)(0xFF-pos)+((b>> 8)&0xFF)*(u32)pos;
 	u32 cb = ((a    )&0xFF)*(u32)(0xFF-pos)+((b    )&0xFF)*(u32)pos;
 	return	(((ca+(ca>>8)+1)>>8)<<24)|
-			(((cr+(cr>>8)+1)>>8)<<16)|
-			(((cg+(cg>>8)+1)>>8)<< 8)|
-			(((cb+(cb>>8)+1)>>8)    );
+	        (((cr+(cr>>8)+1)>>8)<<16)|
+	        (((cg+(cg>>8)+1)>>8)<< 8)|
+	        (((cb+(cb>>8)+1)>>8)    );
 }
 
 
@@ -63,11 +63,11 @@ static void gradient_update(EVG_BaseGradient *_this)
 	if (_this->pos[0]>=0) {
 		if(_this->pos[0]>0) {
 			end = FIX2INT(gf_mulfix(_this->pos[0], maxPos));
-			for (i=0; i<= end;i++) {
+			for (i=0; i<= end; i++) {
 				_this->pre[i] = _this->col[0];
 			}
 		}
-		for (c=0; c<EVGGRADIENTSLOTS;c++) {
+		for (c=0; c<EVGGRADIENTSLOTS; c++) {
 			if (_this->pos[c]<0) break;
 			if (_this->pos[c+1]>=0) {
 				start = FIX2INT(gf_mulfix(_this->pos[c], maxPos));
@@ -75,14 +75,14 @@ static void gradient_update(EVG_BaseGradient *_this)
 				diff = end-start;
 
 				if (diff) {
-					for (i=start;i<=end;i++) {
+					for (i=start; i<=end; i++) {
 						_this->pre[i] = color_interpolate(_this->col[c], _this->col[c+1],
-							(u8) ( ( (i-start) * 255) / diff) );
+						                                  (u8) ( ( (i-start) * 255) / diff) );
 					}
 				}
 			} else {
 				start = FIX2INT(gf_mulfix(_this->pos[c+0], maxPos));
-				for(i=start;i<=EVGGRADIENTMAXINTPOS;i++) {
+				for(i=start; i<=EVGGRADIENTMAXINTPOS; i++) {
 					_this->pre[i] = _this->col[c];
 				}
 			}
@@ -90,7 +90,7 @@ static void gradient_update(EVG_BaseGradient *_this)
 	}
 }
 
-static u32 gradient_get_color(EVG_BaseGradient *_this, s32 pos) 
+static u32 gradient_get_color(EVG_BaseGradient *_this, s32 pos)
 {
 	s32 max_pos = 1 << EVGGRADIENTBITS;
 
@@ -179,7 +179,7 @@ void evg_stencil_delete(GF_STENCIL st)
 		if (tx->owns_texture && tx->pixels) gf_free(tx->pixels);
 		gf_free(_this);
 	}
-		return;
+	return;
 	}
 }
 
@@ -224,7 +224,7 @@ GF_Err evg_stencil_set_brush_color(GF_STENCIL st, GF_Color c)
 	linear gradient stencil
 */
 
-static void lgb_fill_run(EVGStencil *p, EVGSurface *surf, s32 x, s32 y, u32 count) 
+static void lgb_fill_run(EVGStencil *p, EVGSurface *surf, s32 x, s32 y, u32 count)
 {
 	Bool has_cmat, has_a;
 	Fixed _res;
@@ -233,8 +233,8 @@ static void lgb_fill_run(EVGStencil *p, EVGSurface *surf, s32 x, s32 y, u32 coun
 	u32 *data = surf->stencil_pix_run;
 	EVG_LinearGradient *_this = (EVG_LinearGradient *) p;
 
-	has_cmat = _this->cmat.identity ? 0 : 1;
-	has_a = (_this->alpha==0xFF) ? 0 : 1;
+	has_cmat = _this->cmat.identity ? GF_FALSE : GF_TRUE;
+	has_a = (_this->alpha==0xFF) ? GF_FALSE : GF_TRUE;
 
 	/*no need to move x & y to fixed*/
 	_res = (Fixed) (x * _this->smat.m[0] + y * _this->smat.m[1] + _this->smat.m[2]);
@@ -246,7 +246,7 @@ static void lgb_fill_run(EVGStencil *p, EVGSurface *surf, s32 x, s32 y, u32 coun
 		if (has_a) {
 			ca = ((GF_COL_A(col) + 1) * _this->alpha) >> 8;
 			col = ( ((ca<<24) & 0xFF000000) ) | (col & 0x00FFFFFF);
-		} 
+		}
 		if (has_cmat) col = gf_cmx_apply(&p->cmat, col);
 		*data++ = col;
 		count--;
@@ -306,7 +306,7 @@ EVGStencil *evg_linear_gradient_brush()
 	radial gradient stencil
 */
 
-static void rg_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 count) 
+static void rg_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 count)
 {
 	Fixed x, y, dx, dy, b, val;
 	Bool has_cmat, has_a;
@@ -319,8 +319,8 @@ static void rg_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 cou
 	y = INT2FIX(_y);
 	gf_mx2d_apply_coords(&_this->smat, &x, &y);
 
-	has_cmat = _this->cmat.identity ? 0 : 1;
-	has_a = (_this->alpha==0xFF) ? 0 : 1;
+	has_cmat = _this->cmat.identity ? GF_FALSE : GF_TRUE;
+	has_a = (_this->alpha==0xFF) ? GF_FALSE : GF_TRUE;
 
 	dx = x - _this->d_f.x;
 	dy = y - _this->d_f.y;
@@ -334,8 +334,8 @@ static void rg_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 cou
 		if (has_a) {
 			ca = ((GF_COL_A(col) + 1) * _this->alpha) >> 8;
 			col = ( ((ca<<24) & 0xFF000000) ) | (col & 0x00FFFFFF);
-		} 
-		if (has_cmat) col = gf_cmx_apply(&p->cmat, col);		
+		}
+		if (has_cmat) col = gf_cmx_apply(&p->cmat, col);
 		*data++ = col;
 
 		dx += _this->d_i.x;
@@ -344,7 +344,7 @@ static void rg_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 cou
 	}
 }
 
-void evg_radial_init(EVG_RadialGradient *_this) 
+void evg_radial_init(EVG_RadialGradient *_this)
 {
 	GF_Point2D p0, p1;
 	p0.x = p0.y = p1.y = 0;
@@ -499,7 +499,7 @@ static void bmp_untransform_coord(EVG_Texture *_this, s32 _x, s32 _y, Fixed *out
 	*outy=y;
 }
 
-static void bmp_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 count) 
+static void bmp_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 count)
 {
 	s32 cx, x0, y0;
 	u32 pix, replace_col;
@@ -518,20 +518,19 @@ static void bmp_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 co
 	incy = (_this->inc_y>0) ? 1 : -1;
 #endif
 
-	_fd = INT2FIX(_this->width); 
+	_fd = INT2FIX(_this->width);
 	repeat_s = _this->mod & GF_TEXTURE_REPEAT_S;
 	if (!repeat_s && (x < - _fd)) x = 0;
 	while (x<0) x += _fd;
 
-	_fd = INT2FIX(_this->height); 
+	_fd = INT2FIX(_this->height);
 	repeat_t = _this->mod & GF_TEXTURE_REPEAT_T;
 	if (!repeat_t && (y < - _fd)) y = 0;
 	while (y<0) y += _fd;
 
-	y0 = (s32) FIX2INT(y);
-	has_alpha = (_this->alpha != 255) ? 1 : 0;
-	has_replace_cmat = _this->cmat_is_replace ? 1 : 0;
-	has_cmat = _this->cmat.identity ? 0 : 1;
+	has_alpha = (_this->alpha != 255) ? GF_TRUE : GF_FALSE;
+	has_replace_cmat = _this->cmat_is_replace ? GF_TRUE : GF_FALSE;
+	has_cmat = _this->cmat.identity ? GF_FALSE : GF_TRUE;
 	replace_col = _this->replace_col;
 
 	while (count) {
@@ -542,7 +541,7 @@ static void bmp_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 co
 		} else {
 			x0 = MIN(x0, (s32) _this->width - 1);
 		}
-		
+
 		y0 = FIX2INT(y);
 		assert((s32)y0 >=0);
 		if (repeat_t) {
@@ -624,12 +623,12 @@ static void bmp_fill_run(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 co
 
 
 /*just a little faster...*/
-static void bmp_fill_run_straight(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 count) 
+static void bmp_fill_run_straight(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _y, u32 count)
 {
 	s32 x0, y0;
 	u32 pix;
 	u32 __a;
-	Bool repeat_s = 0;
+	Bool repeat_s = GF_FALSE;
 	Fixed x, y, _fdim;
 	char *pix_line;
 	u32 *data = surf->stencil_pix_run;
@@ -683,7 +682,7 @@ static void bmp_fill_run_straight(EVGStencil *p, EVGSurface *surf, s32 _x, s32 _
 	}
 }
 
-void evg_bmp_init(EVGStencil *p) 
+void evg_bmp_init(EVGStencil *p)
 {
 	GF_Point2D p0, p1;
 	EVG_Texture *_this = (EVG_Texture *) p;
@@ -696,13 +695,13 @@ void evg_bmp_init(EVGStencil *p)
 	_this->inc_y = p1.y - p0.y;
 
 	_this->replace_col = 0;
-	_this->cmat_is_replace = 0;
+	_this->cmat_is_replace = GF_FALSE;
 	if (!_this->cmat.identity
-		&& !_this->cmat.m[0] && !_this->cmat.m[1] && !_this->cmat.m[2] && !_this->cmat.m[3]
-		&& !_this->cmat.m[5] && !_this->cmat.m[6] && !_this->cmat.m[7] && !_this->cmat.m[8]
-		&& !_this->cmat.m[10] && !_this->cmat.m[11] && !_this->cmat.m[12] && !_this->cmat.m[13]
-		&& !_this->cmat.m[15] && !_this->cmat.m[16] && !_this->cmat.m[17] && !_this->cmat.m[19]) {
-		_this->cmat_is_replace = 1;
+	        && !_this->cmat.m[0] && !_this->cmat.m[1] && !_this->cmat.m[2] && !_this->cmat.m[3]
+	        && !_this->cmat.m[5] && !_this->cmat.m[6] && !_this->cmat.m[7] && !_this->cmat.m[8]
+	        && !_this->cmat.m[10] && !_this->cmat.m[11] && !_this->cmat.m[12] && !_this->cmat.m[13]
+	        && !_this->cmat.m[15] && !_this->cmat.m[16] && !_this->cmat.m[17] && !_this->cmat.m[19]) {
+		_this->cmat_is_replace = GF_TRUE;
 		_this->replace_col = GF_COL_ARGB(FIX2INT(_this->cmat.m[18]*255), FIX2INT(_this->cmat.m[4]*255), FIX2INT(_this->cmat.m[9]*255), FIX2INT(_this->cmat.m[14]*255));
 	}
 
@@ -731,16 +730,40 @@ EVGStencil *evg_texture_brush()
 }
 
 
-u32 get_pix_argb(char *pix) { return GF_COL_ARGB(*(pix+3) & 0xFF, *(pix+2) & 0xFF, *(pix+1) & 0xFF, *pix & 0xFF); }
-u32 get_pix_rgba(char *pix) { return GF_COL_ARGB(*(pix+3) & 0xFF, *pix & 0xFF, *(pix+1) & 0xFF, *(pix+2) & 0xFF); }
-u32 get_pix_rgb_32(char *pix) { return GF_COL_ARGB(0xFF, *(pix+2) & 0xFF, *(pix+1) & 0xFF, *pix & 0xFF); }
-u32 get_pix_rgb_24(char *pix) { return GF_COL_ARGB(0xFF, *pix & 0xFF, *(pix+1) & 0xFF, *(pix+2) & 0xFF); }
-u32 get_pix_bgr_24(char *pix) { return GF_COL_ARGB(0xFF, *(pix+2) & 0xFF, * (pix+1) & 0xFF, *pix & 0xFF); }
-u32 get_pix_444(char *pix) { u16 val = *(u16*)pix; return GF_COL_ARGB(0xFF,  (u8) ( (val >> 4) & 0xf0), (u8) ( (val) & 0xf0),  (u8) ( (val << 4) & 0xf0)	); }
-u32 get_pix_555(char *pix) { u16 val = *(u16*)pix; return GF_COL_ARGB(0xFF, (u8) ( (val >> 7) & 0xf8), (u8) ( (val >> 2) & 0xf8), (u8) ( (val << 3) & 0xf8) ); }
-u32 get_pix_565(char *pix) { u16 val = *(u16*)pix; return GF_COL_ARGB(0xFF,  (u8) ( (val >> 8) & 0xf8), (u8) ( (val >> 3) & 0xfc),  (u8) ( (val << 3) & 0xf8)	); }
-u32 get_pix_grey(char *pix) { u8 val = *pix; return GF_COL_ARGB(0xFF, val, val, val); }
-u32 get_pix_alphagrey(char *pix) { return GF_COL_ARGB((u8) *(pix+1), (u8) *pix, (u8) *pix, (u8) *pix); }
+u32 get_pix_argb(char *pix) {
+	return GF_COL_ARGB(*(pix+3) & 0xFF, *(pix+2) & 0xFF, *(pix+1) & 0xFF, *pix & 0xFF);
+}
+u32 get_pix_rgba(char *pix) {
+	return GF_COL_ARGB(*(pix+3) & 0xFF, *pix & 0xFF, *(pix+1) & 0xFF, *(pix+2) & 0xFF);
+}
+u32 get_pix_rgb_32(char *pix) {
+	return GF_COL_ARGB(0xFF, *(pix+2) & 0xFF, *(pix+1) & 0xFF, *pix & 0xFF);
+}
+u32 get_pix_rgb_24(char *pix) {
+	return GF_COL_ARGB(0xFF, *pix & 0xFF, *(pix+1) & 0xFF, *(pix+2) & 0xFF);
+}
+u32 get_pix_bgr_24(char *pix) {
+	return GF_COL_ARGB(0xFF, *(pix+2) & 0xFF, * (pix+1) & 0xFF, *pix & 0xFF);
+}
+u32 get_pix_444(char *pix) {
+	u16 val = *(u16*)pix;
+	return GF_COL_ARGB(0xFF,  (u8) ( (val >> 4) & 0xf0), (u8) ( (val) & 0xf0),  (u8) ( (val << 4) & 0xf0)	);
+}
+u32 get_pix_555(char *pix) {
+	u16 val = *(u16*)pix;
+	return GF_COL_ARGB(0xFF, (u8) ( (val >> 7) & 0xf8), (u8) ( (val >> 2) & 0xf8), (u8) ( (val << 3) & 0xf8) );
+}
+u32 get_pix_565(char *pix) {
+	u16 val = *(u16*)pix;
+	return GF_COL_ARGB(0xFF,  (u8) ( (val >> 8) & 0xf8), (u8) ( (val >> 3) & 0xfc),  (u8) ( (val << 3) & 0xf8)	);
+}
+u32 get_pix_grey(char *pix) {
+	u8 val = *pix;
+	return GF_COL_ARGB(0xFF, val, val, val);
+}
+u32 get_pix_alphagrey(char *pix) {
+	return GF_COL_ARGB((u8) *(pix+1), (u8) *pix, (u8) *pix, (u8) *pix);
+}
 
 static void texture_set_callback(EVG_Texture *_this)
 {
@@ -785,7 +808,7 @@ GF_Err evg_stencil_set_texture(GF_STENCIL st, char *pixels, u32 width, u32 heigh
 		return GF_BAD_PARAM;
 
 	_this->pixels = 0L;
-	_this->is_converted = 1;
+	_this->is_converted = GF_TRUE;
 
 	switch (pixelFormat) {
 	case GF_PIXEL_ARGB:
@@ -810,15 +833,15 @@ GF_Err evg_stencil_set_texture(GF_STENCIL st, char *pixels, u32 width, u32 heigh
 	case GF_PIXEL_IYUV:
 	case GF_PIXEL_I420:
 		_this->orig_format = GF_PIXEL_YV12;
-		_this->orig_buf = pixels;
+		_this->orig_buf = (u8 *) pixels;
 		_this->orig_stride = stride;
-		_this->is_converted = 0;
+		_this->is_converted = GF_FALSE;
 		break;
 	case GF_PIXEL_YUVA:
 		_this->orig_format = GF_PIXEL_YUVA;
-		_this->orig_buf = pixels;
+		_this->orig_buf = (u8 *) pixels;
 		_this->orig_stride = stride;
-		_this->is_converted = 0;
+		_this->is_converted = GF_FALSE;
 		break;
 	default:
 		/*the rest is not supported (eg BGR32)*/
@@ -894,66 +917,27 @@ void evg_set_texture_active(EVGStencil *st)
 		_this->conv_buf = (unsigned char *) gf_malloc(sizeof(unsigned char)*_this->conv_size);
 	}
 
-	src.height = _this->height;
+	memset(&src, 0, sizeof(GF_VideoSurface));
+	src.height = _this->height;	
 	src.width = _this->width;
 	src.pitch_x = 0;
 	src.pitch_y = _this->orig_stride;
 	src.pixel_format = _this->orig_format;
-	src.video_buffer = _this->orig_buf;
+	src.video_buffer = (char *)_this->orig_buf;
 
+	memset(&dst, 0, sizeof(GF_VideoSurface));
 	dst.width = _this->width;
 	dst.height = _this->height;
 	dst.pitch_x = _this->Bpp;
 	dst.pitch_y = _this->Bpp * _this->width;
 	dst.pixel_format = _this->pixel_format;
-	dst.video_buffer = _this->conv_buf;
+	dst.video_buffer = (char *) _this->conv_buf;
 
-	gf_stretch_bits(&dst, &src, NULL, NULL, 0xFF, 0, NULL, NULL);
+	gf_stretch_bits(&dst, &src, NULL, NULL, 0xFF, GF_FALSE, NULL, NULL);
 
-	_this->is_converted = 1;
+	_this->is_converted = GF_TRUE;
 	_this->pixels = (char *) _this->conv_buf;
 	_this->stride = _this->Bpp * _this->width;
 	texture_set_callback(_this);
 }
 
-GF_Err evg_stencil_create_texture(GF_STENCIL st, u32 width, u32 height, GF_PixelFormat pixelFormat)
-{
-	EVG_Texture *_this = 	(EVG_Texture *)st;
-	if (_this->orig_buf) return GF_BAD_PARAM;
-	_this->pixels = 0L;
-	_this->is_converted = 1;
-
-	switch (pixelFormat) {
-	case GF_PIXEL_ARGB:
-	case GF_PIXEL_RGBA:
-	case GF_PIXEL_RGB_32:
-		_this->Bpp = 4;
-		break;
-	case GF_PIXEL_RGB_24:
-	case GF_PIXEL_BGR_24:
-		_this->Bpp = 3;
-		break;
-	case GF_PIXEL_RGB_555:
-	case GF_PIXEL_RGB_565:
-	case GF_PIXEL_RGB_444:
-	case GF_PIXEL_ALPHAGREY:
-		_this->Bpp = 2;
-		break;
-	case GF_PIXEL_GREYSCALE:
-		_this->Bpp = 1;
-		break;
-	default:
-		return GF_NOT_SUPPORTED;
-	}
-	_this->pixel_format = pixelFormat;
-	_this->width = width;
-	_this->height = height;
-	_this->stride = width*_this->Bpp;
-
-	if (_this->pixels) gf_free(_this->pixels);
-	_this->pixels = (char *) gf_malloc(sizeof(char) * _this->stride * _this->height);
-	memset(_this->pixels, 0, sizeof(char) * _this->stride * _this->height);
-	_this->owns_texture = 1;
-	texture_set_callback(_this);
-	return GF_OK;
-}

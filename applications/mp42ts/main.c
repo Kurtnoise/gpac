@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -36,78 +36,135 @@
 #include <gpac/scene_engine.h>
 #endif
 
-
-#ifdef GPAC_DISABLE_ISOM
-
-#error "Cannot compile MP42TS if GPAC is not built with ISO File Format support"
-
+#ifndef GPAC_DISABLE_TTXT
+#include <gpac/webvtt.h>
 #endif
+
 
 #ifdef GPAC_DISABLE_MPEG2TS_MUX
-
 #error "Cannot compile MP42TS if GPAC is not built with MPEG2-TS Muxing support"
-
 #endif
 
-
-#define DEFAULT_PCR_OFFSET	18000
-
-#define UDP_BUFFER_SIZE	0x40000
-
-#define MP42TS_PRINT_FREQ 634 /*refresh printed info every CLOCK_REFRESH ms*/
+#define MP42TS_PRINT_TIME_MS 500 /*refresh printed info every CLOCK_REFRESH ms*/
 #define MP42TS_VIDEO_FREQ 1000 /*meant to send AVC IDR only every CLOCK_REFRESH ms*/
 
-static GFINLINE void usage(const char * progname) 
+
+s32 temi_id_1 = -1;
+s32 temi_id_2 = -1;
+
+u32 temi_url_insertion_delay = 1000;
+u32 temi_offset = 0;
+Bool temi_disable_loop = GF_FALSE;
+Double temi_period=0;
+Bool request_temi_toggle = GF_FALSE;
+Bool temi_on = GF_TRUE;
+Bool temi_single_toggle = GF_FALSE;
+u64 temi_period_last_dts = 0;
+FILE *logfile = NULL;
+
+static void on_gpac_log(void *cbk, GF_LOG_Level ll, GF_LOG_Tool lm, const char *fmt, va_list list)
 {
-	fprintf(stderr, "USAGE: %s -rate=R [[-prog=prog1]..[-prog=progn]] [-audio=url] [-video=url] [-mpeg4-carousel=n] [-mpeg4] [-time=n] [-src=file] DST [[DST]]\n"
-					"\n"
+	FILE *logs = (FILE*)cbk;
+	vfprintf(logs, fmt, list);
+	fflush(logs);
+}
+
+static GFINLINE void usage()
+{
+	fprintf(stderr, "GPAC version " GPAC_FULL_VERSION "\n"
+	        "(c) Telecom ParisTech 2000-2018 - Licence LGPL v2\n"
+	        "GPAC Configuration: " GPAC_CONFIGURATION "\n"
+	        "Features: %s\n\n", gpac_features());
+	fprintf(stderr, "mp42ts <inputs> <destinations> [options]\n"
+	        "\n"
+	        "Inputs:\n"
+	        "-src filename[:OPTS]   specifies an input file used for a TS service\n"
+	        "                        * currently only supports ISO files and SDP files\n"
+	        "                        * can be used several times, once for each program\n"
+	        "By default each source is a program in a TS. \n"
+	        "Source options are colon-separated list of options, as follows:\n"
+	        "ID=N                   specifies the program ID for this source.\n"
+	        "             All sources with the same ID will be added to the same program\n"
+	        "name=STR               program name, as used in DVB service description table\n"
+	        "provider=STR           provider name, as used in DVB service description table\n"
+	        "disc                   the first packet of each stream will have the discontinuity marker set\n"
+	        "pmt=N                  stes version number of the PMT\n"
+
+	        "\n"
+	        "-prog filename        same as -src filename\n"
+	        "\n"
+	        "Destinations:\n"
+	        "Several destinations may be specified as follows, at least one is mandatory\n"
+	        "-dst-udp UDP_address:port (multicast or unicast)\n"
+	        "-dst-rtp RTP_address:port\n"
+	        "-dst-file filename\n"
+	        "The following parameters may be specified when -dst-file is used\n"
+	        "-segment-dir dir       server local directory to store segments (ends with a '/')\n"
+	        "-segment-duration dur  segment duration in seconds\n"
+	        "-segment-manifest file m3u8 file basename\n"
+	        "-segment-http-prefix p client address for accessing server segments\n"
+	        "-segment-number n      number of segments to list in the manifest\n"
+	        "\n"
+	        "Basic options:\n"
+	        "-rate R                specifies target rate in kbps of the multiplex (optional)\n"
+	        "-real-time             specifies the muxer will work in real-time mode\n"
+	        "                        * if not specified, the muxer will generate the TS as quickly as possible\n"
+	        "                        * automatically set for SDP or BT input\n"
+	        "-pcr-init V            sets initial value V for PCR - if not set, random value is used\n"
+	        "-pcr-offset V          offsets all timestamps from PCR by V, in 90kHz. Default value is computed based on input media.\n"
+	        "-psi-rate V            sets PSI refresh rate V in ms (default 100ms).\n"
+	        "                        * If 0, PSI data is only send once at the beginning or before each IDR when -rap option is set.\n"
+	        "                        * This should be set to 0 for DASH streams.\n"
+	        "-time n                request the muxer to stop after n ms\n"
+	        "-single-au             forces 1 PES = 1 AU (disabled by default)\n"
+	        "-multi-au              forces 1 PES = N AU for all streams (disabled by default).\n"
+	        "                        By default, audio streams pack N AUs in one PES but video and systems data use 1 AU per PES.\n"
+	        "-rap                   forces RAP/IDR to be aligned with PES start for video streams (disabled by default)\n"
+	        "                          in this mode, PAT, PMT and PCR will be inserted before the first TS packet of the RAP PES\n"
+	        "-flush-rap             same as -rap but flushes all other streams (sends remaining PES packets) before inserting PAT/PMT\n"
+	        "-nb-pack N             specifies to pack up to N TS packets together before sending on network or writing to file\n"
+	        "-pcr-ms N              sets max interval in ms between 2 PCR. Default is 100 ms or at each PES header\n"
+	        "-force-pcr-only        allows sending PCR-only packets to enforce the requested PCR rate - STILL EXPERIMENTAL.\n"
+	        "-ttl N                 specifies Time-To-Live for multicast. Default is 1.\n"
+	        "-ifce IPIFCE           specifies default IP interface to use. Default is IF_ANY.\n"
+	        "-temi [URL]            Inserts TEMI time codes in adaptation field. URL is optional, and can be a number for external timeline IDs\n"
+	        "-temi-delay DelayMS    Specifies delay between two TEMI url descriptors (default is 1000)\n"
+	        "-temi-offset OffsetMS  Specifies an offset in ms to add to TEMI (by default TEMI starts at 0)\n"
+	        "-temi-noloop           Do not restart the TEMI timeline at the end of the source\n"
+	        "-temi2 ID              Inserts a secondary TEMI time codes in adaptation field of the audio PID if any. ID shall be set to the desired external timeline IDs\n"
+	        "-insert-ntp            Inserts NTP timestamp in TEMI timeline descriptor\n"
+	        "-sdt-rate MS           Gives the SDT carrousel rate in milliseconds. If 0 (default), SDT is not sent\n"
+	        "\n"
+	        "MPEG-4/T-DMB options:\n"
+	        "-bifs-src filename          update file: must be either an .sdp or a .bt file\n"
+	        "-audio url             may be mp3/udp or aac/http (shoutcast/icecast)\n"
+	        "-video url             shall be a raw h264 frame\n"
+	        "-mpeg4-carousel n      carousel period in ms\n"
+	        "-mpeg4 or -4on2        forces usage of MPEG-4 signaling (IOD and SL Config)\n"
+	        "-4over2                same as -4on2 and uses PMT to carry OD Updates\n"
+	        "-bifs-pes              carries BIFS over PES instead of sections\n"
+	        "-bifs-pes-ex           carries BIFS over PES without writing timestamps in SL\n"
+	        "\n"
+	        "Misc options\n"
 #ifdef GPAC_MEMORY_TRACKING
-					"\t-mem-track:  enables memory tracker\n"
+            "-mem-track             enables memory tracker\n"
+            "-mem-track-stack       enables memory tracker stack dumping\n"
 #endif
-					"\t-rate=R                specifies target rate in kbps of the multiplex (mandatory)\n"
-					"\t-real-time             specifies the muxer will work in real-time mode\n"
-					"\t                        * automatically set for SDP or BT input\n"
-					"\t-pcr-init=V            sets initial value V for PCR - if not set, random value is used\n"
-					"\t-pcr-offset=V          offsets all timestamps from PCR by V, in 90kHz. Default value: %d\n"
-					"\t-psi-rate=V            sets PSI refresh rate V in ms (default 100ms). If 0, PSI data is only send once at the begining\n"
-					"\t-time=n                request the program to stop after n ms\n"
-					"\t-single-au             forces 1 PES = 1 AU (disabled by default)\n"
-					"\t-rap                   forces RAP/IDR to be aligned with PES start for video streams (disabled by default)\n"
-					"                          in this mode, PAT, PMT and PCR will be inserted before the first TS packet of the RAP PES\n"
-					"\t-prog=filename         specifies an input file used for a TS service\n"
-					"\t                        * currently only supports ISO files and SDP files\n"
-					"\t                        * can be used several times, once for each program\n"
-					"\t-audio=url             may be mp3/udp or aac/http (shoutcast/icecast)\n"
-					"\t-video=url             shall be a raw h264 frame\n"
-					"\t-src=filename          update file: must be either an .sdp or a .bt file\n\n"
-					"\tDST : Destinations, at least one is mandatory\n"
-					"\t  -dst-udp             UDP_address:port (multicast or unicast)\n"
-					"\t  -dst-rtp             RTP_address:port\n"
-					"\t  -dst-file            Supports the following arguments:\n"
-					"\t     -segment-dir=dir       server local directory to store segments\n"
-					"\t     -segment-duration=dur  segment duration in seconds\n"
-					"\t     -segment-manifest=file m3u8 file basename\n"
-					"\t     -segment-http-prefix=p client address for accessing server segments\n"
-					"\t     -segment-number=n      only n segments are used using a cyclic pattern\n"
-					"\t\n"
-					"\tMPEG-4 options\n"
-					"\t-mpeg4-carousel=n      carousel period in ms\n"
-                    "\t-mpeg4 or -4on2        forces usage of MPEG-4 signaling (IOD and SL Config)\n"
-                    "\t-4over2                same as -4on2 and uses PMT to carry OD Updates\n"
-                    "\t-bifs-pes              carries BIFS over PES instead of sections\n"
-                    "\t-bifs-pes-ex           carries BIFS over PES without writing timestamps in SL\n"
-					"\t\n"
-					"\t-logs                  set log tools and levels, formatted as a ':'-separated list of toolX[:toolZ]@levelX\n"
-					"\t-h or -help            print this screen\n"
-					"\n", progname, DEFAULT_PCR_OFFSET
-		);
+	        "-logs                  set log tools and levels, formatted as a ':'-separated list of toolX[:toolZ]@levelX\n"
+	        "-h or -help            print this screen\n"
+	        "\n"
+	       );
 }
 
 
 #define MAX_MUX_SRC_PROG	100
 typedef struct
 {
+
+#ifndef GPAC_DISABLE_ISOM
 	GF_ISOFile *mp4;
+#endif
+
 	u32 nb_streams, pcr_idx;
 	GF_ESInterface streams[40];
 	GF_Descriptor *iod;
@@ -115,7 +172,7 @@ typedef struct
 	GF_SceneEngine *seng;
 #endif
 	GF_Thread *th;
-	char *src_name;
+	char *bifs_src_name;
 	u32 rate;
 	Bool repeat;
 	u32 mpeg4_signaling;
@@ -125,26 +182,42 @@ typedef struct
 	Bool real_time;
 	GF_List *od_updates;
 
-	Double last_ntp;
-} M2TSProgram;
+	u32 max_sample_size;
 
+	char program_name[20];
+	char provider_name[20];
+	u32 ID;
+	Bool is_not_program_declaration;
+	Bool set_disc;
+	u32 pmt_version;
+
+	Double last_ntp;
+} M2TSSource;
+
+#ifndef GPAC_DISABLE_ISOM
 typedef struct
 {
 	GF_ISOFile *mp4;
 	u32 track, sample_number, sample_count;
+	u32 mstype, mtype;
 	GF_ISOSample *sample;
 	/*refresh rate for images*/
 	u32 image_repeat_ms, nb_repeat_last;
 	void *dsi;
 	u32 dsi_size;
-	u32 nalu_size;
+
 	void *dsi_and_rap;
 	Bool loop;
 	Bool is_repeat;
-	u64 ts_offset;
-	M2TSProgram *prog;
-	char nalu_delim[6];
+	s64 ts_offset, cts_dts_shift;
+	M2TSSource *source;
+
+	const char *temi_url;
+	u32 last_temi_url, timeline_id;
+	Bool insert_ntp;
+
 } GF_ESIMP4;
+#endif
 
 typedef struct
 {
@@ -183,8 +256,93 @@ enum
 #endif
 };
 
+static u32 format_af_descriptor(char *af_data, u32 timeline_id, u64 timecode, u32 timescale, u64 ntp, const char *temi_url, u32 *last_url_time)
+{
+	u32 res;
+	u32 len;
+	u32 last_time=0;
+	GF_BitStream *bs = gf_bs_new(af_data, 188, GF_BITSTREAM_WRITE);
+
+	if (ntp) {
+		last_time = 1000*(ntp>>32);
+		last_time += 1000*(ntp&0xFFFFFFFF)/0xFFFFFFFF;
+	} else if (timescale) {
+		last_time = (u32) (1000*timecode/timescale);
+	}
+	if (temi_url && (!*last_url_time || (last_time - *last_url_time + 1 >= temi_url_insertion_delay)) ) {
+		*last_url_time = last_time + 1;
+		len = 0;
+		gf_bs_write_int(bs,	GF_M2TS_AFDESC_LOCATION_DESCRIPTOR, 8);
+		gf_bs_write_int(bs,	len, 8);
+
+		gf_bs_write_int(bs,	0, 1); //force_reload
+		gf_bs_write_int(bs,	0, 1); //is_announcement
+		gf_bs_write_int(bs,	0, 1); //splicing_flag
+		gf_bs_write_int(bs,	0, 1); //use_base_temi_url
+		gf_bs_write_int(bs,	0xFF, 5); //reserved
+		gf_bs_write_int(bs,	timeline_id, 7); //timeline_id
+
+		if (temi_url) {
+			char *url = (char *)temi_url;
+			if (!strnicmp(temi_url, "http://", 7)) {
+				gf_bs_write_int(bs,	1, 8); //url_scheme
+				url = (char *) temi_url + 7;
+			} else if (!strnicmp(temi_url, "https://", 8)) {
+				gf_bs_write_int(bs,	2, 8); //url_scheme
+				url = (char *) temi_url + 8;
+			} else {
+				gf_bs_write_int(bs,	0, 8); //url_scheme
+			}
+			gf_bs_write_u8(bs, (u32) strlen(url)); //url_path_len
+			gf_bs_write_data(bs, url, (u32) strlen(url) ); //url
+			gf_bs_write_u8(bs, 0); //nb_addons
+		}
+		//rewrite len
+		len = (u32) gf_bs_get_position(bs) - 2;
+		af_data[1] = len;
+	}
+
+	if (timescale || ntp) {
+		Bool use64 = (timecode > 0xFFFFFFFFUL) ? GF_TRUE : GF_FALSE;
+		len = 3; //3 bytes flags
+
+		if (timescale) len += 4 + (use64 ? 8 : 4);
+		if (ntp) len += 8;
+
+		//write timeline descriptor
+		gf_bs_write_int(bs,	GF_M2TS_AFDESC_TIMELINE_DESCRIPTOR, 8);
+		gf_bs_write_int(bs,	len, 8);
+
+		gf_bs_write_int(bs,	timescale ? (use64 ? 2 : 1) : 0, 2); //has_timestamp
+		gf_bs_write_int(bs,	ntp ? 1 : 0, 1); //has_ntp
+		gf_bs_write_int(bs,	0, 1); //has_ptp
+		gf_bs_write_int(bs,	0, 2); //has_timecode
+		gf_bs_write_int(bs,	0, 1); //force_reload
+		gf_bs_write_int(bs,	0, 1); //paused
+		gf_bs_write_int(bs,	0, 1); //discontinuity
+		gf_bs_write_int(bs,	0xFF, 7); //reserved
+		gf_bs_write_int(bs,	timeline_id, 8); //timeline_id
+		if (timescale) {
+			gf_bs_write_u32(bs,	timescale); //timescale
+			if (use64)
+				gf_bs_write_u64(bs,	timecode); //timestamp
+			else
+				gf_bs_write_u32(bs,	(u32) timecode); //timestamp
+		}
+		if (ntp) {
+			gf_bs_write_u64(bs,	ntp); //ntp
+		}
+	}
+	res = (u32) gf_bs_get_position(bs);
+	gf_bs_del(bs);
+	return res;
+}
+
+#ifndef GPAC_DISABLE_ISOM
+
 static GF_Err mp4_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 {
+	char af_data[188];
 	GF_ESIMP4 *priv = (GF_ESIMP4 *)ifce->input_udta;
 	if (!priv) return GF_BAD_PARAM;
 
@@ -192,106 +350,148 @@ static GF_Err mp4_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 	case GF_ESI_INPUT_DATA_FLUSH:
 	{
 		GF_ESIPacket pck;
-		if (!priv->sample) 
+#ifndef GPAC_DISABLE_TTXT
+		GF_List *cues = NULL;
+#endif
+		if (!priv->sample)
 			priv->sample = gf_isom_get_sample(priv->mp4, priv->track, priv->sample_number+1, NULL);
 
 		if (!priv->sample) {
 			return GF_IO_ERR;
 		}
 
-		pck.flags = 0;
+		memset(&pck, 0, sizeof(GF_ESIPacket));
+
 		pck.flags = GF_ESI_DATA_AU_START | GF_ESI_DATA_HAS_CTS;
 		if (priv->sample->IsRAP) pck.flags |= GF_ESI_DATA_AU_RAP;
 		pck.cts = priv->sample->DTS + priv->ts_offset;
 		if (priv->is_repeat) pck.flags |= GF_ESI_DATA_REPEAT;
 
+		if (priv->timeline_id) {
+			Bool deactivate_temi=GF_FALSE;
+			u64 ntp=0;
+			u64 tc = priv->sample->DTS + priv->sample->CTS_Offset + priv->cts_dts_shift;
+			Bool insert_temi=GF_FALSE;
+			if (temi_disable_loop) {
+				tc += priv->ts_offset;
+			}
+
+			if (temi_offset) {
+				tc += ((u64) temi_offset) * ifce->timescale / 1000;
+			}
+
+			if (priv->insert_ntp) {
+				u32 sec, frac;
+				gf_net_get_ntp(&sec, &frac);
+				ntp = sec;
+				ntp <<= 32;
+				ntp |= frac;
+			}
+			if (!temi_period) {
+				//toggle temi at RAP POINTS ONLY
+				if (request_temi_toggle && priv->sample->IsRAP) {
+					temi_on = !temi_on;
+					if (!temi_on) {
+						deactivate_temi = GF_TRUE;
+					}
+					fprintf(stderr, "Turning TEMI %st at DTS "LLU" (%g sec)\n", temi_on ? "on" : "off" , priv->sample->DTS, ((Double)priv->sample->DTS)/ifce->timescale);
+					request_temi_toggle = GF_FALSE;
+				}
+				insert_temi = temi_on;
+			} else {
+
+				if (!temi_on) {
+					if (priv->sample->IsRAP && ((priv->sample->DTS - temi_period_last_dts) >= temi_period * ifce->timescale)) {
+						temi_on = GF_TRUE;
+						temi_period_last_dts = priv->sample->DTS;
+						fprintf(stderr, "Turning TEMI on at DTS "LLU" (%g sec)\n", priv->sample->DTS, ((Double)priv->sample->DTS)/ifce->timescale);
+					}
+				} else {
+					if (!temi_single_toggle && priv->sample->IsRAP && ((priv->sample->DTS - temi_period_last_dts) >= temi_period * ifce->timescale)) {
+						temi_on = GF_FALSE;
+						temi_period_last_dts = priv->sample->DTS;
+						fprintf(stderr, "Turning TEMI off at DTS "LLU" (%g sec)\n", priv->sample->DTS, ((Double)priv->sample->DTS)/ifce->timescale);
+						deactivate_temi = GF_TRUE;
+					}
+				}
+				insert_temi = temi_on;
+			}
+
+			if (insert_temi) {
+				pck.mpeg2_af_descriptors_size = format_af_descriptor(af_data, priv->timeline_id - 1, tc, ifce->timescale, ntp, priv->temi_url, &priv->last_temi_url);
+				pck.mpeg2_af_descriptors = af_data;
+			} else if (deactivate_temi) {
+				pck.mpeg2_af_descriptors_size = format_af_descriptor(af_data, priv->timeline_id - 1, 0, 0, 0, "", &priv->last_temi_url);
+				pck.mpeg2_af_descriptors = af_data;
+			}
+		}
+
 		if (priv->nb_repeat_last) {
 			pck.cts += priv->nb_repeat_last*ifce->timescale * priv->image_repeat_ms / 1000;
 		}
 
+		pck.dts = pck.cts;
+		if (priv->cts_dts_shift) {
+			pck.cts += + priv->cts_dts_shift;
+			pck.flags |= GF_ESI_DATA_HAS_DTS;
+		}
+
 		if (priv->sample->CTS_Offset) {
-			pck.dts = pck.cts;
 			pck.cts += priv->sample->CTS_Offset;
 			pck.flags |= GF_ESI_DATA_HAS_DTS;
 		}
 
-		if (priv->nalu_size) {
-			Bool nalu_delim_sent = 0;
-			u32 remain = priv->sample->dataLength;
-			char *ptr = priv->sample->data;
-			u32 v, size;
-			char sc[10];
-
-
-			/*send nalus*/
-			sc[0] = sc[1] = sc[2] = 0; sc[3] = 1;
-			while (remain) {
-				size = 0;
-				v = priv->nalu_size;
-				while (v) {
-					size |= (u8) *ptr;
-					ptr++;
-					remain--;
-					v-=1;
-					if (v) size<<=8;
-				}
-				remain -= size;
-
-				if (!nalu_delim_sent) {
-					nalu_delim_sent = 1;
-					/*send a NALU delim: copy over NAL ref idc*/
-					sc[4] = (ptr[0] & 0x60) | GF_AVC_NALU_ACCESS_UNIT;
-					sc[5] = 0xF0 /*7 "all supported NALUs" (=111) + rbsp trailing (10000)*/;
-
-					pck.data = sc;
-					pck.data_len = 6;
-					ifce->output_ctrl(ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
-					pck.flags &= ~GF_ESI_DATA_AU_START;
-
-					/*and send SPD / PPS if RAP - it is not clear in the specs whether SPS/PPS should be inserted after
-					the AU delimiter NALU*/
-					if (priv->sample->IsRAP && priv->dsi && priv->dsi_size) {
-						pck.data = priv->dsi;
-						pck.data_len = priv->dsi_size;
-						ifce->output_ctrl(ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
-						pck.flags &= ~GF_ESI_DATA_AU_START;
-					}
-				}
-
-				pck.data = sc;
-				pck.data_len = 4;
-				ifce->output_ctrl(ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
-
-				if (!remain) pck.flags |= GF_ESI_DATA_AU_END;
-				pck.flags &= ~GF_ESI_DATA_AU_START;
-
-				pck.data = ptr;
-				pck.data_len = size;
-				ifce->output_ctrl(ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
-				ptr += size;
-			}
-
-		} else {
-
-			if (priv->sample->IsRAP && priv->dsi && priv->dsi_size) {
-				pck.data = priv->dsi;
-				pck.data_len = priv->dsi_size;
-				ifce->output_ctrl(ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
-				pck.flags &= ~GF_ESI_DATA_AU_START;
-			}
-
-			pck.flags |= GF_ESI_DATA_AU_END;
-			pck.data = priv->sample->data;
-			pck.data_len = priv->sample->dataLength;
+		if (priv->sample->IsRAP && priv->dsi && priv->dsi_size) {
+			pck.data = (char*)priv->dsi;
+			pck.data_len = priv->dsi_size;
 			ifce->output_ctrl(ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
+			pck.flags &= ~GF_ESI_DATA_AU_START;
 		}
 
+		pck.flags |= GF_ESI_DATA_AU_END;
+		pck.data = priv->sample->data;
+		pck.data_len = priv->sample->dataLength;
+		pck.duration = gf_isom_get_sample_duration(priv->mp4, priv->track, priv->sample_number+1);
+#ifndef GPAC_DISABLE_TTXT
+		if (priv->mtype==GF_ISOM_MEDIA_TEXT && priv->mstype==GF_ISOM_SUBTYPE_WVTT) {
+			u64             start;
+			GF_WebVTTCue    *cue;
+			GF_List *gf_webvtt_parse_iso_cues(GF_ISOSample *iso_sample, u64 start);
+			start = (priv->sample->DTS * 1000) / ifce->timescale;
+			cues = gf_webvtt_parse_iso_cues(priv->sample, start);
+			if (gf_list_count(cues)>1) {
+				GF_LOG(GF_LOG_DEBUG, GF_LOG_CONTAINER, ("[MPEG-2 TS Muxer] More than one cue in sample\n"));
+			}
+			cue = (GF_WebVTTCue *)gf_list_get(cues, 0);
+			if (cue) {
+				pck.data = cue->text;
+				pck.data_len = (u32)strlen(cue->text)+1;
+			} else {
+				pck.data = NULL;
+				pck.data_len = 0;
+			}
+		}
+#endif
+		ifce->output_ctrl(ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_CONTAINER, ("[MPEG-2 TS Muxer] Track %d: sample %d CTS %d\n", priv->track, priv->sample_number+1, pck.cts));
+
+#ifndef GPAC_DISABLE_VTT
+		if (cues) {
+			while (gf_list_count(cues)) {
+				GF_WebVTTCue *cue = (GF_WebVTTCue *)gf_list_get(cues, 0);
+				gf_list_rem(cues, 0);
+				gf_webvtt_cue_del(cue);
+			}
+			gf_list_del(cues);
+			cues = NULL;
+		}
+#endif
 		gf_isom_sample_del(&priv->sample);
 		priv->sample_number++;
 
-		if (!priv->prog->real_time && !priv->is_repeat) {
-			priv->prog->samples_done++;
-			gf_set_progress("Converting to MPEG-2 TS", priv->prog->samples_done, priv->prog->samples_count);
+		if (!priv->source->real_time && !priv->is_repeat) {
+			priv->source->samples_done++;
+			gf_set_progress("MPEG-2 TS Muxing", priv->source->samples_done, priv->source->samples_count);
 		}
 
 		if (priv->sample_number==priv->sample_count) {
@@ -304,24 +504,24 @@ static GF_Err mp4_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 				duration = (u64) (gf_isom_get_duration(priv->mp4) * scale);
 				priv->ts_offset += duration;
 				priv->sample_number = 0;
-				priv->is_repeat = (priv->sample_count==1) ? 1 : 0;
+				priv->is_repeat = (priv->sample_count==1) ? GF_TRUE : GF_FALSE;
 			}
-			else if (priv->image_repeat_ms && priv->prog->nb_real_streams) {
+			else if (priv->image_repeat_ms && priv->source->nb_real_streams) {
 				priv->nb_repeat_last++;
 				priv->sample_number--;
-				priv->is_repeat = 1;
+				priv->is_repeat = GF_TRUE;
 			} else {
 				if (!(ifce->caps & GF_ESI_STREAM_IS_OVER)) {
 					ifce->caps |= GF_ESI_STREAM_IS_OVER;
 					if (priv->sample_count>1) {
-						assert(priv->prog->nb_real_streams);
-						priv->prog->nb_real_streams--;
+						assert(priv->source->nb_real_streams);
+						priv->source->nb_real_streams--;
 					}
 				}
 			}
 		}
 	}
-		return GF_OK;
+	return GF_OK;
 
 	case GF_ESI_INPUT_DESTROY:
 		if (priv->dsi) gf_free(priv->dsi);
@@ -337,77 +537,88 @@ static GF_Err mp4_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 	}
 }
 
-static void fill_isom_es_ifce(M2TSProgram *prog, GF_ESInterface *ifce, GF_ISOFile *mp4, u32 track_num, u32 bifs_use_pes)
+static void fill_isom_es_ifce(M2TSSource *source, GF_ESInterface *ifce, GF_ISOFile *mp4, u32 track_num, u32 bifs_use_pes, Bool compute_max_size)
 {
 	GF_ESIMP4 *priv;
-	char _lan[4];
-	GF_DecoderConfig *dcd;
+	char *_lan;
+	GF_ESD *esd;
+	Bool is_hevc=GF_FALSE;
 	u64 avg_rate, duration;
+	s32 ref_count;
+	s64 mediaOffset;
 
 	GF_SAFEALLOC(priv, GF_ESIMP4);
+	if (!priv) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("Failed to allocate MP4 input handler\n"));
+		return;
+	}
 
 	priv->mp4 = mp4;
 	priv->track = track_num;
-	priv->loop = prog->real_time ? 1 : 0;
+	priv->mtype = gf_isom_get_media_type(priv->mp4, priv->track);
+	priv->mstype = gf_isom_get_media_subtype(priv->mp4, priv->track, 1);
+	priv->loop = source->real_time ? GF_TRUE : GF_FALSE;
 	priv->sample_count = gf_isom_get_sample_count(mp4, track_num);
-	prog->samples_count += priv->sample_count;
+	source->samples_count += priv->sample_count;
 	if (priv->sample_count>1)
-		prog->nb_real_streams++;
+		source->nb_real_streams++;
 
-	priv->prog = prog;
+	priv->source = source;
 	memset(ifce, 0, sizeof(GF_ESInterface));
 	ifce->stream_id = gf_isom_get_track_id(mp4, track_num);
-	dcd = gf_isom_get_decoder_config(mp4, track_num, 1);
-	ifce->stream_type = dcd->streamType;
-	ifce->object_type_indication = dcd->objectTypeIndication;
-	if (dcd->decoderSpecificInfo && dcd->decoderSpecificInfo->dataLength) {
-		switch (dcd->objectTypeIndication) {
-		case GPAC_OTI_AUDIO_AAC_MPEG4:
-			ifce->decoder_config = gf_malloc(sizeof(char)*dcd->decoderSpecificInfo->dataLength);
-			ifce->decoder_config_size = dcd->decoderSpecificInfo->dataLength;
-			memcpy(ifce->decoder_config, dcd->decoderSpecificInfo->data, dcd->decoderSpecificInfo->dataLength);
-			break;
-		case GPAC_OTI_VIDEO_MPEG4_PART2:
-			priv->dsi = gf_malloc(sizeof(char)*dcd->decoderSpecificInfo->dataLength);
-			priv->dsi_size = dcd->decoderSpecificInfo->dataLength;
-			memcpy(priv->dsi, dcd->decoderSpecificInfo->data, dcd->decoderSpecificInfo->dataLength);
-			break;
-		case GPAC_OTI_VIDEO_AVC:
-		{
-#ifndef GPAC_DISABLE_AV_PARSERS
-			GF_AVCConfigSlot *slc;
-			u32 i;
-			GF_BitStream *bs;
-			GF_AVCConfig *avccfg = gf_isom_avc_config_get(mp4, track_num, 1);
-			priv->nalu_size = avccfg->nal_unit_size;
-			bs = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
-			for (i=0; i<gf_list_count(avccfg->sequenceParameterSets);i++) {
-				slc = gf_list_get(avccfg->sequenceParameterSets, i);
-				gf_bs_write_u32(bs, 1);
-				gf_bs_write_data(bs, slc->data, slc->size);
+
+	esd = gf_media_map_esd(mp4, track_num);
+
+	if (esd) {
+		ifce->stream_type = esd->decoderConfig->streamType;
+		ifce->object_type_indication = esd->decoderConfig->objectTypeIndication;
+		if (esd->decoderConfig->decoderSpecificInfo && esd->decoderConfig->decoderSpecificInfo->dataLength) {
+			switch (esd->decoderConfig->objectTypeIndication) {
+			case GPAC_OTI_AUDIO_AAC_MPEG4:
+			case GPAC_OTI_AUDIO_AAC_MPEG2_MP:
+			case GPAC_OTI_AUDIO_AAC_MPEG2_LCP:
+			case GPAC_OTI_AUDIO_AAC_MPEG2_SSRP:
+			case GPAC_OTI_VIDEO_MPEG4_PART2:
+				ifce->decoder_config = (char *)gf_malloc(sizeof(char)*esd->decoderConfig->decoderSpecificInfo->dataLength);
+				ifce->decoder_config_size = esd->decoderConfig->decoderSpecificInfo->dataLength;
+				memcpy(ifce->decoder_config, esd->decoderConfig->decoderSpecificInfo->data, esd->decoderConfig->decoderSpecificInfo->dataLength);
+				if (esd->decoderConfig->objectTypeIndication == GPAC_OTI_VIDEO_MPEG4_PART2) {
+					priv->dsi = (char *)gf_malloc(sizeof(char)*esd->decoderConfig->decoderSpecificInfo->dataLength);
+					priv->dsi_size = esd->decoderConfig->decoderSpecificInfo->dataLength;
+					memcpy(priv->dsi, esd->decoderConfig->decoderSpecificInfo->data, esd->decoderConfig->decoderSpecificInfo->dataLength);
+				}
+				break;
+			case GPAC_OTI_VIDEO_HEVC:
+			case GPAC_OTI_VIDEO_LHVC:
+				is_hevc=GF_TRUE;
+			case GPAC_OTI_VIDEO_AVC:
+			case GPAC_OTI_VIDEO_SVC:
+			case GPAC_OTI_VIDEO_MVC:
+				gf_isom_set_nalu_extract_mode(mp4, track_num, GF_ISOM_NALU_EXTRACT_LAYER_ONLY | GF_ISOM_NALU_EXTRACT_INBAND_PS_FLAG | GF_ISOM_NALU_EXTRACT_ANNEXB_FLAG | GF_ISOM_NALU_EXTRACT_VDRD_FLAG);
+				break;
+			case GPAC_OTI_SCENE_VTT_MP4:
+				ifce->decoder_config = (char *)gf_malloc(sizeof(char)*esd->decoderConfig->decoderSpecificInfo->dataLength);
+				ifce->decoder_config_size = esd->decoderConfig->decoderSpecificInfo->dataLength;
+				memcpy(ifce->decoder_config, esd->decoderConfig->decoderSpecificInfo->data, esd->decoderConfig->decoderSpecificInfo->dataLength);
+				break;
 			}
-			for (i=0; i<gf_list_count(avccfg->pictureParameterSets);i++) {
-				slc = gf_list_get(avccfg->pictureParameterSets, i);
-				gf_bs_write_u32(bs, 1);
-				gf_bs_write_data(bs, slc->data, slc->size);
-			}
-			gf_bs_get_content(bs, (char **) &priv->dsi, &priv->dsi_size);
-			gf_bs_del(bs);
-#endif
-			priv->nalu_delim[3] = 1;
-			priv->nalu_delim[4] = 0; /*this will be nal header*/
-			priv->nalu_delim[5] = 0xF0 /*7 "all supported NALUs" (=111) + rbsp trailing (10000)*/;
 		}
-			break;
-		}
+		gf_odf_desc_del((GF_Descriptor *)esd);
 	}
-	gf_odf_desc_del((GF_Descriptor *)dcd);
-	gf_isom_get_media_language(mp4, track_num, _lan);
-	ifce->lang = GF_4CC(_lan[0],_lan[1],_lan[2],' ');
+	gf_isom_get_media_language(mp4, track_num, &_lan);
+	if (!_lan || !strcmp(_lan, "und")) {
+		ifce->lang = 0;
+	} else {
+		ifce->lang = GF_4CC(_lan[0],_lan[1],_lan[2],' ');
+	}
+	if (_lan) {
+		gf_free(_lan);
+	}
 
 	ifce->timescale = gf_isom_get_media_timescale(mp4, track_num);
 	ifce->duration = gf_isom_get_media_timescale(mp4, track_num);
 	avg_rate = gf_isom_get_media_data_size(mp4, track_num);
+	if (!avg_rate) return;
 	avg_rate *= ifce->timescale * 8;
 	if (0!=(duration=gf_isom_get_media_duration(mp4, track_num)))
 		avg_rate /= duration;
@@ -419,8 +630,12 @@ static void fill_isom_es_ifce(M2TSProgram *prog, GF_ESInterface *ifce, GF_ISOFil
 	ifce->duration /= ifce->timescale;
 
 	GF_SAFEALLOC(ifce->sl_config, GF_SLConfig);
+	if (!ifce->sl_config) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("Failed to allocate interface SLConfig\n"));
+		return;
+	}
+
 	ifce->sl_config->tag = GF_ODF_SLC_TAG;
-//	ifce->sl_config->predefined = 3;
 	ifce->sl_config->useAccessUnitStartFlag = 1;
 	ifce->sl_config->useAccessUnitEndFlag = 1;
 	ifce->sl_config->useRandomAccessPointFlag = 1;
@@ -433,7 +648,7 @@ static void fill_isom_es_ifce(M2TSProgram *prog, GF_ESInterface *ifce, GF_ISOFil
 		ifce->sl_config->timestampLength = 0;
 		ifce->sl_config->timestampResolution = 90000;
 	}
-	
+
 #ifdef GPAC_DISABLE_ISOM_WRITE
 	fprintf(stderr, "Warning: GPAC was compiled without ISOM Write support, can't set SL Config!\n");
 #else
@@ -441,12 +656,43 @@ static void fill_isom_es_ifce(M2TSProgram *prog, GF_ESInterface *ifce, GF_ISOFil
 #endif
 
 	ifce->input_ctrl = mp4_input_ctrl;
-	if (priv != ifce->input_udta){
-	  if (ifce->input_udta)
-	    gf_free(ifce->input_udta);
-	  ifce->input_udta = priv;
+	if (priv != ifce->input_udta) {
+		if (ifce->input_udta)
+			gf_free(ifce->input_udta);
+		ifce->input_udta = priv;
 	}
+
+
+	if (! gf_isom_get_edit_list_type(mp4, track_num, &mediaOffset)) {
+		priv->ts_offset = mediaOffset;
+	}
+
+	if (gf_isom_has_time_offset(mp4, track_num)==2) {
+		priv->cts_dts_shift = gf_isom_get_cts_to_dts_shift(mp4, track_num);
+	}
+
+	ifce->depends_on_stream = 0;
+	ref_count = gf_isom_get_reference_count(mp4, track_num, GF_ISOM_REF_SCAL);
+	if (ref_count > 0) {
+		gf_isom_get_reference_ID(mp4, track_num, GF_ISOM_REF_SCAL, (u32) ref_count, &ifce->depends_on_stream);
+	} else if (is_hevc) {
+		ref_count = gf_isom_get_reference_count(mp4, track_num, GF_ISOM_REF_BASE);
+		if (ref_count > 0) {
+			gf_isom_get_reference_ID(mp4, track_num, GF_ISOM_REF_BASE, (u32) ref_count, &ifce->depends_on_stream);
+		}
+	}
+
+	if (compute_max_size) {
+		u32 i;
+		for (i=0; i < priv->sample_count; i++) {
+			u32 s = gf_isom_get_sample_size(mp4, track_num, i+1);
+			if (s>source->max_sample_size) source->max_sample_size = s;
+		}
+	}
+
 }
+
+#endif //GPAC_DISABLE_ISOM
 
 
 #ifndef GPAC_DISABLE_SENG
@@ -455,7 +701,7 @@ static GF_Err seng_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 	if (act_type==GF_ESI_INPUT_DESTROY) {
 		//TODO: free my data
 		if (ifce->input_udta)
-		  gf_free(ifce->input_udta);
+			gf_free(ifce->input_udta);
 		ifce->input_udta = NULL;
 		return GF_OK;
 	}
@@ -487,7 +733,7 @@ typedef struct
 
 	s64 ts_offset;
 	Bool rtcp_init;
-	M2TSProgram *prog;
+	M2TSSource *source;
 
 	u32 min_dts_inc;
 	u64 prev_cts;
@@ -508,7 +754,7 @@ static GF_Err rtp_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 	case GF_ESI_INPUT_DATA_FLUSH:
 		/*flush rtcp channel*/
 		while (1) {
-			Bool has_sr=0;
+			Bool has_sr = GF_FALSE;
 			size = gf_rtp_read_rtcp(rtp->rtp_ch, buffer, 8000);
 			if (!size) break;
 			e = gf_rtp_decode_rtcp(rtp->rtp_ch, buffer, size, &has_sr);
@@ -518,17 +764,17 @@ static GF_Err rtp_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 			if (has_sr && !rtp->rtcp_init) {
 				Double time = rtp->rtp_ch->last_SR_NTP_sec;
 				time += ((Double)rtp->rtp_ch->last_SR_NTP_frac)/0xFFFFFFFF;
-				if (!rtp->prog->last_ntp) {
-					rtp->prog->last_ntp = time;
+				if (!rtp->source->last_ntp) {
+					rtp->source->last_ntp = time;
 				}
-				if (time >= rtp->prog->last_ntp) {
-					time -= rtp->prog->last_ntp;
+				if (time >= rtp->source->last_ntp) {
+					time -= rtp->source->last_ntp;
 				} else {
 					time = 0;
 				}
 				rtp->ts_offset = rtp->rtp_ch->last_SR_rtp_time;
 				rtp->ts_offset -= (s64) (time * rtp->rtp_ch->TimeScale);
-				rtp->rtcp_init = 1;
+				rtp->rtcp_init = GF_TRUE;
 			}
 		}
 		/*flush rtp channel*/
@@ -619,7 +865,7 @@ static void rtp_sl_packet_cbk(void *udta, char *payload, u32 size, GF_SLHeader *
 
 			/*since we don't inspect the RTP content, we can only concatenate SPS and PPS indicated in SDP*/
 			if (hdr->randomAccessPointFlag && rtp->dsi_and_rap) {
-				rtp->pck.data = rtp->dsi_and_rap;
+				rtp->pck.data = (char*)rtp->dsi_and_rap;
 				rtp->pck.data_len = rtp->avc_dsi_size;
 
 				rtp->ifce->output_ctrl(rtp->ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &rtp->pck);
@@ -637,13 +883,13 @@ static void rtp_sl_packet_cbk(void *udta, char *payload, u32 size, GF_SLHeader *
 			rtp->dsi_and_rap = gf_malloc(sizeof(char)*(rtp->pck.data_len));
 			memcpy(rtp->dsi_and_rap, rtp->depacketizer->sl_map.config, rtp->depacketizer->sl_map.configSize);
 			memcpy((char *) rtp->dsi_and_rap + rtp->depacketizer->sl_map.configSize, payload, size);
-			rtp->pck.data = rtp->dsi_and_rap;
+			rtp->pck.data = (char*)rtp->dsi_and_rap;
 		}
 		rtp->ifce->output_ctrl(rtp->ifce, GF_ESI_OUTPUT_DATA_DISPATCH, &rtp->pck);
 	}
 }
 
-static void fill_rtp_es_ifce(GF_ESInterface *ifce, GF_SDPMedia *media, GF_SDPInfo *sdp, M2TSProgram *prog)
+static void fill_rtp_es_ifce(GF_ESInterface *ifce, GF_SDPMedia *media, GF_SDPInfo *sdp, M2TSSource *source)
 {
 	u32 i;
 	GF_Err e;
@@ -660,6 +906,10 @@ static void fill_rtp_es_ifce(GF_ESInterface *ifce, GF_SDPMedia *media, GF_SDPInf
 	/*check payload type*/
 	map = (GF_RTPMap*)gf_list_get(media->RTPMaps, 0);
 	GF_SAFEALLOC(rtp, GF_ESIRTP);
+	if (!rtp) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("Failed to allocate RTP input handler\n"));
+		return;
+	}
 
 	memset(ifce, 0, sizeof(GF_ESInterface));
 	rtp->rtp_ch = gf_rtp_new();
@@ -671,7 +921,7 @@ static void fill_rtp_es_ifce(GF_ESInterface *ifce, GF_SDPMedia *media, GF_SDPInf
 	memset(&trans, 0, sizeof(GF_RTSPTransport));
 	trans.Profile = media->Profile;
 	trans.source = conn ? conn->host : sdp->o_address;
-	trans.IsUnicast = gf_sk_is_multicast_address(trans.source) ? 0 : 1;
+	trans.IsUnicast = gf_sk_is_multicast_address(trans.source) ? GF_FALSE : GF_TRUE;
 	if (!trans.IsUnicast) {
 		trans.port_first = media->PortNumber;
 		trans.port_last = media->PortNumber + 1;
@@ -698,7 +948,7 @@ static void fill_rtp_es_ifce(GF_ESInterface *ifce, GF_SDPMedia *media, GF_SDPInf
 	ifce->input_udta = rtp;
 	ifce->input_ctrl = rtp_input_ctrl;
 	rtp->ifce = ifce;
-	rtp->prog = prog;
+	rtp->source = source;
 
 	ifce->object_type_indication = rtp->depacketizer->sl_map.ObjectTypeIndication;
 	ifce->stream_type = rtp->depacketizer->sl_map.StreamType;
@@ -706,54 +956,56 @@ static void fill_rtp_es_ifce(GF_ESInterface *ifce, GF_SDPMedia *media, GF_SDPInf
 	if (rtp->depacketizer->sl_map.config) {
 		switch (ifce->object_type_indication) {
 		case GPAC_OTI_VIDEO_MPEG4_PART2:
-			rtp->cat_dsi = 1;
+			rtp->cat_dsi = GF_TRUE;
 			break;
 		case GPAC_OTI_VIDEO_AVC:
-			rtp->is_264 = 1;
+		case GPAC_OTI_VIDEO_SVC:
+		case GPAC_OTI_VIDEO_MVC:
+			rtp->is_264 = GF_TRUE;
 			rtp->depacketizer->flags |= GF_RTP_AVC_USE_ANNEX_B;
-		{
+			{
 #ifndef GPAC_DISABLE_AV_PARSERS
-			GF_AVCConfig *avccfg = gf_odf_avc_cfg_read(rtp->depacketizer->sl_map.config, rtp->depacketizer->sl_map.configSize);
-			if (avccfg) {
-				GF_AVCConfigSlot *slc;
-				u32 i;
-				GF_BitStream *bs;
+				GF_AVCConfig *avccfg = gf_odf_avc_cfg_read(rtp->depacketizer->sl_map.config, rtp->depacketizer->sl_map.configSize);
+				if (avccfg) {
+					GF_AVCConfigSlot *slc;
+					u32 i;
+					GF_BitStream *bs;
 
-				bs = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
-				for (i=0; i<gf_list_count(avccfg->sequenceParameterSets);i++) {
-					slc = gf_list_get(avccfg->sequenceParameterSets, i);
-					gf_bs_write_u32(bs, 1);
-					gf_bs_write_data(bs, slc->data, slc->size);
+					bs = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
+					for (i=0; i<gf_list_count(avccfg->sequenceParameterSets); i++) {
+						slc = (GF_AVCConfigSlot*)gf_list_get(avccfg->sequenceParameterSets, i);
+						gf_bs_write_u32(bs, 1);
+						gf_bs_write_data(bs, slc->data, slc->size);
+					}
+					for (i=0; i<gf_list_count(avccfg->pictureParameterSets); i++) {
+						slc = (GF_AVCConfigSlot*)gf_list_get(avccfg->pictureParameterSets, i);
+						gf_bs_write_u32(bs, 1);
+						gf_bs_write_data(bs, slc->data, slc->size);
+					}
+					gf_bs_get_content(bs, (char **) &rtp->dsi_and_rap, &rtp->avc_dsi_size);
+					gf_bs_del(bs);
 				}
-				for (i=0; i<gf_list_count(avccfg->pictureParameterSets);i++) {
-					slc = gf_list_get(avccfg->pictureParameterSets, i);
-					gf_bs_write_u32(bs, 1);
-					gf_bs_write_data(bs, slc->data, slc->size);
-				}
-				gf_bs_get_content(bs, (char **) &rtp->dsi_and_rap, &rtp->avc_dsi_size);
-				gf_bs_del(bs);
-			}	
-			gf_odf_avc_cfg_del(avccfg);
+				gf_odf_avc_cfg_del(avccfg);
 #endif
-		}
+			}
 			break;
 		case GPAC_OTI_AUDIO_AAC_MPEG4:
-			ifce->decoder_config = gf_malloc(sizeof(char) * rtp->depacketizer->sl_map.configSize);
+			ifce->decoder_config = (char*)gf_malloc(sizeof(char) * rtp->depacketizer->sl_map.configSize);
 			ifce->decoder_config_size = rtp->depacketizer->sl_map.configSize;
 			memcpy(ifce->decoder_config, rtp->depacketizer->sl_map.config, rtp->depacketizer->sl_map.configSize);
 			break;
 		}
 	}
 	if (rtp->depacketizer->sl_map.StreamStateIndication) {
-		rtp->use_carousel = 1;
+		rtp->use_carousel = GF_TRUE;
 		rtp->au_sn=0;
 	}
 
 	/*DTS signaling is only supported for MPEG-4 visual*/
 	if (rtp->depacketizer->sl_map.DTSDeltaLength) ifce->caps |= GF_ESI_SIGNAL_DTS;
 
-	gf_rtp_depacketizer_reset(rtp->depacketizer, 1);
-	e = gf_rtp_initialize(rtp->rtp_ch, 0x100000ul, 0, 0, 10, 200, NULL);
+	gf_rtp_depacketizer_reset(rtp->depacketizer, GF_TRUE);
+	e = gf_rtp_initialize(rtp->rtp_ch, 0x100000ul, GF_FALSE, 0, 10, 200, NULL);
 	if (e!=GF_OK) {
 		gf_rtp_del(rtp->rtp_ch);
 		fprintf(stderr, "Cannot initialize RTP channel: %s\n", gf_error_to_string(e));
@@ -763,10 +1015,12 @@ static void fill_rtp_es_ifce(GF_ESInterface *ifce, GF_SDPMedia *media, GF_SDPInf
 }
 #endif /*GPAC_DISABLE_STREAMING*/
 
+#ifndef GPAC_DISABLE_SENG
 static GF_Err void_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 {
 	return GF_OK;
 }
+#endif
 
 /*AAC import features*/
 #ifndef GPAC_DISABLE_PLAYER
@@ -774,12 +1028,12 @@ static GF_Err void_input_ctrl(GF_ESInterface *ifce, u32 act_type, void *param)
 void *audio_prog = NULL;
 static void SampleCallBack(void *calling_object, u16 ESID, char *data, u32 size, u64 ts);
 #define DONT_USE_TERMINAL_MODULE_API
-#include "../../modules/aac_in/aac_in.c" 
+#include "../../modules/aac_in/aac_in.c"
 AACReader *aac_reader = NULL;
 u64 audio_discontinuity_offset = 0;
 
 /*create an OD codec and encode the descriptor*/
-static GF_Err encode_audio_desc(GF_ESD *esd, GF_SimpleDataDescriptor *audio_desc) 
+static GF_Err encode_audio_desc(GF_ESD *esd, GF_SimpleDataDescriptor *audio_desc)
 {
 	GF_Err e;
 	GF_ODCodec *odc = gf_odf_codec_new();
@@ -820,12 +1074,12 @@ static GF_Err encode_audio_desc(GF_ESD *esd, GF_SimpleDataDescriptor *audio_desc
 
 
 static void SampleCallBack(void *calling_object, u16 ESID, char *data, u32 size, u64 ts)
-{		
+{
 	u32 i;
 	//fprintf(stderr, "update: ESID=%d - size=%d - ts="LLD"\n", ESID, size, ts);
 
 	if (calling_object) {
-		M2TSProgram *prog = (M2TSProgram *)calling_object;
+		M2TSSource *source = (M2TSSource *)calling_object;
 
 #ifndef GPAC_DISABLE_PLAYER
 		if (ESID == AUDIO_DATA_ESID) {
@@ -833,7 +1087,7 @@ static void SampleCallBack(void *calling_object, u16 ESID, char *data, u32 size,
 				/*this is the first time we get some audio data. Therefore we are sure we can retrieve the audio descriptor. Then we'll
 				  send it by calling this callback recursively so that a player gets the audio descriptor before audio data.
 				  Hack: the descriptor is carried thru the input_udta, you shall delete it*/
-				GF_SimpleDataDescriptor *audio_desc = prog->streams[audio_OD_stream_id].input_udta;
+				GF_SimpleDataDescriptor *audio_desc = source->streams[audio_OD_stream_id].input_udta;
 				if (audio_desc && !audio_desc->data) /*intended for HTTP/AAC: an empty descriptor was set (vs already filled for RTP/UDP MP3)*/
 				{
 					/*get the audio descriptor and encode it*/
@@ -846,14 +1100,18 @@ static void SampleCallBack(void *calling_object, u16 ESID, char *data, u32 size,
 					/*audio stream, all samples are RAPs*/
 					esd->slConfig->useRandomAccessPointFlag = 0;
 					esd->slConfig->hasRandomAccessUnitsOnlyFlag = 1;
-					for (i=0; i<prog->nb_streams; i++) {
-						if (prog->streams[i].stream_id == AUDIO_DATA_ESID) {
+					for (i=0; i<source->nb_streams; i++) {
+						if (source->streams[i].stream_id == AUDIO_DATA_ESID) {
 							GF_Err e;
-							prog->streams[i].timescale = esd->slConfig->timestampResolution;
-							e = gf_m2ts_program_stream_update_ts_scale(&prog->streams[i], esd->slConfig->timestampResolution);
-							assert(!e);
-							if (!prog->streams[i].sl_config) prog->streams[i].sl_config = (GF_SLConfig *)gf_odf_desc_new(GF_ODF_SLC_TAG);
-							memcpy(prog->streams[i].sl_config, esd->slConfig, sizeof(GF_SLConfig));
+							source->streams[i].timescale = esd->slConfig->timestampResolution;
+							e = gf_m2ts_program_stream_update_ts_scale(&source->streams[i], esd->slConfig->timestampResolution);
+							if (e != GF_OK) {
+								fprintf(stderr, "Failed updating TS program timescale\n");
+							}
+							else if (!source->streams[i].sl_config)
+								source->streams[i].sl_config = (GF_SLConfig *)gf_odf_desc_new(GF_ODF_SLC_TAG);
+
+							memcpy(source->streams[i].sl_config, esd->slConfig, sizeof(GF_SLConfig));
 							break;
 						}
 					}
@@ -864,37 +1122,41 @@ static void SampleCallBack(void *calling_object, u16 ESID, char *data, u32 size,
 					/*build the ESI*/
 					{
 						/*audio OD descriptor: rap=1 and vers_inc=0*/
-						GF_SAFEALLOC(prog->streams[audio_OD_stream_id].input_udta, GF_ESIStream);
-						((GF_ESIStream*)prog->streams[audio_OD_stream_id].input_udta)->rap = 1;
+						GF_SAFEALLOC(source->streams[audio_OD_stream_id].input_udta, GF_ESIStream);
+						if (!source->streams[audio_OD_stream_id].input_udta) {
+							GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("Failed to allocate aac input handler\n"));
+							return;
+						}
+						((GF_ESIStream*)source->streams[audio_OD_stream_id].input_udta)->rap = 1;
 
 						/*we have the descriptor; now call this callback recursively so that a player gets the audio descriptor before audio data.*/
-						prog->repeat = 1;
-						SampleCallBack(prog, AUDIO_OD_ESID, audio_desc->data, audio_desc->size, 0/*gf_m2ts_get_sys_clock(muxer)*/);
-						prog->repeat = 0;
+						source->repeat = 1;
+						SampleCallBack(source, AUDIO_OD_ESID, audio_desc->data, audio_desc->size, 0/*gf_m2ts_get_sys_clock(muxer)*/);
+						source->repeat = 0;
 
 						/*clean*/
 						gf_free(audio_desc->data);
 						gf_free(audio_desc);
-						gf_free(prog->streams[audio_OD_stream_id].input_udta);
-						prog->streams[audio_OD_stream_id].input_udta = NULL;
+						gf_free(source->streams[audio_OD_stream_id].input_udta);
+						source->streams[audio_OD_stream_id].input_udta = NULL;
 					}
 				}
 			}
 			/*update the timescale if needed*/
-			else if (!prog->audio_configured) {
+			else if (!source->audio_configured) {
 				GF_ESD *esd = AAC_GetESD(aac_reader);
 				assert(esd->slConfig->timestampResolution);
-				for (i=0; i<prog->nb_streams; i++) {
-					if (prog->streams[i].stream_id == AUDIO_DATA_ESID) {
+				for (i=0; i<source->nb_streams; i++) {
+					if (source->streams[i].stream_id == AUDIO_DATA_ESID) {
 						GF_Err e;
-						prog->streams[i].timescale = esd->slConfig->timestampResolution;
-						prog->streams[i].decoder_config = esd->decoderConfig->decoderSpecificInfo->data;
-						prog->streams[i].decoder_config_size = esd->decoderConfig->decoderSpecificInfo->dataLength;
+						source->streams[i].timescale = esd->slConfig->timestampResolution;
+						source->streams[i].decoder_config = esd->decoderConfig->decoderSpecificInfo->data;
+						source->streams[i].decoder_config_size = esd->decoderConfig->decoderSpecificInfo->dataLength;
 						esd->decoderConfig->decoderSpecificInfo->data = NULL;
 						esd->decoderConfig->decoderSpecificInfo->dataLength = 0;
-						e = gf_m2ts_program_stream_update_ts_scale(&prog->streams[i], esd->slConfig->timestampResolution);
+						e = gf_m2ts_program_stream_update_ts_scale(&source->streams[i], esd->slConfig->timestampResolution);
 						if (!e)
-							prog->audio_configured = 1;
+							source->audio_configured = 1;
 						break;
 					}
 				}
@@ -906,13 +1168,13 @@ static void SampleCallBack(void *calling_object, u16 ESID, char *data, u32 size,
 		}
 #endif
 		i=0;
-		while (i<prog->nb_streams){
-			if (prog->streams[i].output_ctrl==NULL) {
+		while (i<source->nb_streams) {
+			if (source->streams[i].output_ctrl==NULL) {
 				fprintf(stderr, "MULTIPLEX NOT YET CREATED\n");
 				return;
 			}
-			if (prog->streams[i].stream_id == ESID) {
-				GF_ESIStream *priv = (GF_ESIStream *)prog->streams[i].input_udta;
+			if (source->streams[i].stream_id == ESID) {
+				GF_ESIStream *priv = (GF_ESIStream *)source->streams[i].input_udta;
 				GF_ESIPacket pck;
 				memset(&pck, 0, sizeof(GF_ESIPacket));
 				pck.data = data;
@@ -925,19 +1187,19 @@ static void SampleCallBack(void *calling_object, u16 ESID, char *data, u32 size,
 
 				if (priv->rap)
 					pck.flags |= GF_ESI_DATA_AU_RAP;
-				if (prog->repeat || !priv->vers_inc) {
+				if (source->repeat || !priv->vers_inc) {
 					pck.flags |= GF_ESI_DATA_REPEAT;
 					fprintf(stderr, "RAP carousel from scene engine sent: ESID=%d - size=%d - ts="LLD"\n", ESID, size, ts);
 				} else {
 					if (ESID != AUDIO_DATA_ESID && ESID != VIDEO_DATA_ESID)	/*don't log A/V inputs*/
-						fprintf(stderr, "Update from scene engine sent: ESID=%d - size=%d - ts="LLD"\n", ESID, size, ts); 
+						fprintf(stderr, "Update from scene engine sent: ESID=%d - size=%d - ts="LLD"\n", ESID, size, ts);
 				}
-				prog->streams[i].output_ctrl(&prog->streams[i], GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
+				source->streams[i].output_ctrl(&source->streams[i], GF_ESI_OUTPUT_DATA_DISPATCH, &pck);
 				return;
 			}
-		i++;
+			i++;
 		}
-	} 
+	}
 	return;
 }
 
@@ -947,7 +1209,7 @@ static void SampleCallBack(void *calling_object, u16 ESID, char *data, u32 size,
 static volatile Bool run = 1;
 
 #ifndef GPAC_DISABLE_SENG
-static GF_ESIStream * set_broadcast_params(M2TSProgram *prog, u16 esid, u32 period, u32 ts_delta, u16 aggregate_on_stream, Bool adjust_carousel_time, Bool force_rap, Bool aggregate_au, Bool discard_pending, Bool signal_rap, Bool signal_critical, Bool version_inc)
+static GF_ESIStream * set_broadcast_params(M2TSSource *source, u16 esid, u32 period, u32 ts_delta, u16 aggregate_on_stream, Bool adjust_carousel_time, Bool force_rap, Bool aggregate_au, Bool discard_pending, Bool signal_rap, Bool signal_critical, Bool version_inc)
 {
 	u32 i=0;
 	GF_ESIStream *priv=NULL;
@@ -955,13 +1217,13 @@ static GF_ESIStream * set_broadcast_params(M2TSProgram *prog, u16 esid, u32 peri
 
 	/*locate our stream*/
 	if (esid) {
-		while (i<prog->nb_streams) {
-			if (prog->streams[i].stream_id == esid){
-				priv = (GF_ESIStream *)prog->streams[i].input_udta; 
-				esi = &prog->streams[i]; 
+		while (i<source->nb_streams) {
+			if (source->streams[i].stream_id == esid) {
+				priv = (GF_ESIStream *)source->streams[i].input_udta;
+				esi = &source->streams[i];
 				break;
 			}
-			else{
+			else {
 				i++;
 			}
 		}
@@ -976,7 +1238,7 @@ static GF_ESIStream * set_broadcast_params(M2TSProgram *prog, u16 esid, u32 peri
 	}
 
 	/*remember RAP flag*/
-	priv->rap = signal_rap; 
+	priv->rap = signal_rap;
 	priv->critical = signal_critical;
 	priv->vers_inc = version_inc;
 
@@ -985,7 +1247,7 @@ static GF_ESIStream * set_broadcast_params(M2TSProgram *prog, u16 esid, u32 peri
 
 	/*change stream aggregation mode*/
 	if ((aggregate_on_stream != (u16)-1) && (priv->aggregate_on_stream != aggregate_on_stream)) {
-		gf_seng_enable_aggregation(prog->seng, esid, aggregate_on_stream);
+		gf_seng_enable_aggregation(source->seng, esid, aggregate_on_stream);
 		priv->aggregate_on_stream = aggregate_on_stream;
 	}
 	/*change stream aggregation mode*/
@@ -1002,13 +1264,15 @@ static GF_ESIStream * set_broadcast_params(M2TSProgram *prog, u16 esid, u32 peri
 
 #ifndef GPAC_DISABLE_SENG
 
-static Bool seng_output(void *param)
+static u32 seng_output(void *param)
 {
 	GF_Err e;
 	u64 last_src_modif, mod_time;
-	M2TSProgram *prog = (M2TSProgram *)param;
-	GF_SceneEngine *seng = prog->seng;
+	M2TSSource *source = (M2TSSource *)param;
+	GF_SceneEngine *seng = source->seng;
+#ifndef GPAC_DISABLE_PLAYER
 	GF_SimpleDataDescriptor *audio_desc;
+#endif
 	Bool update_context=0;
 	Bool force_rap, adjust_carousel_time, discard_pending, signal_rap, signal_critical, version_inc, aggregate_au;
 	u32 period, ts_delta;
@@ -1016,42 +1280,44 @@ static Bool seng_output(void *param)
 	e = GF_OK;
 	gf_sleep(2000); /*TODO: events instead? What are we waiting for?*/
 	gf_seng_encode_context(seng, SampleCallBack);
-	
-	last_src_modif = prog->src_name ? gf_file_modification_time(prog->src_name) : 0;
+
+	last_src_modif = source->bifs_src_name ? gf_file_modification_time(source->bifs_src_name) : 0;
 
 	/*send the audio descriptor*/
-	if (prog->mpeg4_signaling==GF_M2TS_MPEG4_SIGNALING_FULL && audio_OD_stream_id!=(u32)-1) {
-		audio_desc = prog->streams[audio_OD_stream_id].input_udta;
+#ifndef GPAC_DISABLE_PLAYER
+	if (source->mpeg4_signaling==GF_M2TS_MPEG4_SIGNALING_FULL && audio_OD_stream_id!=(u32)-1) {
+		audio_desc = source->streams[audio_OD_stream_id].input_udta;
 		if (audio_desc && audio_desc->data) /*RTP/UDP + MP3 case*/
 		{
 			assert(audio_OD_stream_id != (u32)-1);
 			assert(!aac_reader); /*incompatible with AAC*/
-			prog->repeat = 1;
-			SampleCallBack(prog, AUDIO_OD_ESID, audio_desc->data, audio_desc->size, 0/*gf_m2ts_get_sys_clock(muxer)*/);
-			prog->repeat = 0;
+			source->repeat = 1;
+			SampleCallBack(source, AUDIO_OD_ESID, audio_desc->data, audio_desc->size, 0/*gf_m2ts_get_sys_clock(muxer)*/);
+			source->repeat = 0;
 			gf_free(audio_desc->data);
 			gf_free(audio_desc);
-			prog->streams[audio_OD_stream_id].input_udta = NULL;
+			source->streams[audio_OD_stream_id].input_udta = NULL;
 		}
 	}
+#endif
 
 	while (run) {
 		if (!gf_prompt_has_input()) {
-			if (prog->src_name) {
-				mod_time = gf_file_modification_time(prog->src_name);
+			if (source->bifs_src_name) {
+				mod_time = gf_file_modification_time(source->bifs_src_name);
 				if (mod_time != last_src_modif) {
 					FILE *srcf;
 					char flag_buf[201], *flag;
 					fprintf(stderr, "Update file modified - processing\n");
 					last_src_modif = mod_time;
 
-					srcf = gf_f64_open(prog->src_name, "rt");
+					srcf = gf_fopen(source->bifs_src_name, "rt");
 					if (!srcf) continue;
 
 					/*checks if we have a broadcast config*/
 					if (!fgets(flag_buf, 200, srcf))
-					  flag_buf[0] = '\0';
-					fclose(srcf);
+						flag_buf[0] = '\0';
+					gf_fclose(srcf);
 
 					aggregate_au = force_rap = adjust_carousel_time = discard_pending = signal_rap = signal_critical = 0;
 					version_inc = 1;
@@ -1112,25 +1378,25 @@ static Bool seng_output(void *param)
 							}
 						}
 
-						set_broadcast_params(prog, es_id, period, ts_delta, aggregate_on_stream, adjust_carousel_time, force_rap, aggregate_au, discard_pending, signal_rap, signal_critical, version_inc);
+						set_broadcast_params(source, es_id, period, ts_delta, aggregate_on_stream, adjust_carousel_time, force_rap, aggregate_au, discard_pending, signal_rap, signal_critical, version_inc);
 					}
 
-					e = gf_seng_encode_from_file(seng, es_id, aggregate_au ? 0 : 1, prog->src_name, SampleCallBack);
-					if (e){
+					e = gf_seng_encode_from_file(seng, es_id, aggregate_au ? 0 : 1, source->bifs_src_name, SampleCallBack);
+					if (e) {
 						fprintf(stderr, "Processing command failed: %s\n", gf_error_to_string(e));
 					} else
 						gf_seng_aggregate_context(seng, 0);
 
 					update_context=1;
 
-					
+
 
 				}
 			}
 			if (update_context) {
-				prog->repeat = 1;
+				source->repeat = 1;
 				e = gf_seng_encode_context(seng, SampleCallBack);
-				prog->repeat = 0;
+				source->repeat = 0;
 				update_context = 0;
 			}
 
@@ -1138,46 +1404,46 @@ static Bool seng_output(void *param)
 		} else { /*gf_prompt_has_input()*/
 			char c = gf_prompt_get_char();
 			switch (c) {
-				case 'u':
-				{
-					GF_Err e;
-					char szCom[8192];
-					fprintf(stderr, "Enter command to send:\n");
-					fflush(stdin);
-					szCom[0] = 0;
-					if (1 > scanf("%[^\t\n]", szCom)){
-					    fprintf(stderr, "No command has been properly entered, aborting.\n");
-					    break;
-					}
-					e = gf_seng_encode_from_string(seng, 0, 0, szCom, SampleCallBack);
-					if (e) { 
-						fprintf(stderr, "Processing command failed: %s\n", gf_error_to_string(e));
-					}
-					update_context=1;
-				}
+			case 'u':
+			{
+				GF_Err e;
+				char szCom[8192];
+				fprintf(stderr, "Enter command to send:\n");
+				fflush(stdin);
+				szCom[0] = 0;
+				if (1 > scanf("%[^\t\n]", szCom)) {
+					fprintf(stderr, "No command has been properly entered, aborting.\n");
 					break;
-				case 'p':
-				{
-					char rad[GF_MAX_PATH];
-					fprintf(stderr, "Enter output file name - \"std\" for stderr: ");
-					if (1 > scanf("%s", rad)){
-					    fprintf(stderr, "No outfile name has been entered, aborting.\n");
-					    break;
-					}
-					e = gf_seng_save_context(seng, !strcmp(rad, "std") ? NULL : rad);
-					fprintf(stderr, "Dump done (%s)\n", gf_error_to_string(e)); 
 				}
+				e = gf_seng_encode_from_string(seng, 0, 0, szCom, SampleCallBack);
+				if (e) {
+					fprintf(stderr, "Processing command failed: %s\n", gf_error_to_string(e));
+				}
+				update_context=1;
+			}
+			break;
+			case 'p':
+			{
+				char rad[GF_MAX_PATH];
+				fprintf(stderr, "Enter output file name - \"std\" for stderr: ");
+				if (1 > scanf("%s", rad)) {
+					fprintf(stderr, "No outfile name has been entered, aborting.\n");
 					break;
-				case 'q':
-				{
-					run = 0;
 				}
+				e = gf_seng_save_context(seng, !strcmp(rad, "std") ? NULL : rad);
+				fprintf(stderr, "Dump done (%s)\n", gf_error_to_string(e));
+			}
+			break;
+			case 'q':
+			{
+				run = 0;
+			}
 			}
 			e = GF_OK;
 		}
 	}
-	
-	
+
+
 	return e ? 1 : 0;
 }
 
@@ -1189,19 +1455,23 @@ void fill_seng_es_ifce(GF_ESInterface *ifce, u32 i, GF_SceneEngine *seng, u32 pe
 	char *config_buffer = NULL;
 
 	memset(ifce, 0, sizeof(GF_ESInterface));
-	e = gf_seng_get_stream_config(seng, i, (u16*) &(ifce->stream_id), &config_buffer, &len, (u32*) &(ifce->stream_type), (u32*) &(ifce->object_type_indication), &(ifce->timescale)); 
+	e = gf_seng_get_stream_config(seng, i, (u16*) &(ifce->stream_id), &config_buffer, &len, (u32*) &(ifce->stream_type), (u32*) &(ifce->object_type_indication), &(ifce->timescale));
 	if (e) {
 		fprintf(stderr, "Cannot set the stream config for stream %d to %d: %s\n", ifce->stream_id, period, gf_error_to_string(e));
 	}
 
 	ifce->repeat_rate = period;
 	GF_SAFEALLOC(stream, GF_ESIStream);
-	memset(stream, 0, sizeof(GF_ESIStream));
+	if (!stream) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("Failed to allocate SENG input handler\n"));
+		return;
+	}
+
 	stream->rap = 1;
 	if (ifce->input_udta)
-	  gf_free(ifce->input_udta);
+		gf_free(ifce->input_udta);
 	ifce->input_udta = stream;
-	
+
 	//fprintf(stderr, "Caroussel period: %d\n", period);
 //	e = gf_seng_set_carousel_time(seng, ifce->stream_id, period);
 	if (e) {
@@ -1212,57 +1482,81 @@ void fill_seng_es_ifce(GF_ESInterface *ifce, u32 i, GF_SceneEngine *seng, u32 pe
 }
 #endif
 
-static Bool open_program(M2TSProgram *prog, char *src, u32 carousel_rate, u32 mpeg4_signaling, char *update, char *audio_input_ip, u16 audio_input_port, char *video_buffer, Bool force_real_time, u32 bifs_use_pes)
+static Bool open_source(M2TSSource *source, char *src, u32 carousel_rate, u32 mpeg4_signaling, char *update, char *audio_input_ip, u16 audio_input_port, char *video_buffer, Bool force_real_time, u32 bifs_use_pes, const char *temi_url, Bool compute_max_size, Bool insert_ntp)
 {
 #ifndef GPAC_DISABLE_STREAMING
 	GF_SDPInfo *sdp;
 #endif
-	u32 i;
-	
-	memset(prog, 0, sizeof(M2TSProgram));
-	prog->mpeg4_signaling = mpeg4_signaling;
+
+	memset(source, 0, sizeof(M2TSSource));
+	source->mpeg4_signaling = mpeg4_signaling;
 
 	/*open ISO file*/
+#ifndef GPAC_DISABLE_ISOM
 	if (gf_isom_probe_file(src)) {
+		u32 i;
 		u32 nb_tracks;
 		Bool has_bifs_od = 0;
+		Bool temi_assigned = 0;
 		u32 first_audio = 0;
 		u32 first_other = 0;
-		prog->mp4 = gf_isom_open(src, GF_ISOM_OPEN_READ, 0);
-		prog->nb_streams = 0;
-		prog->real_time = force_real_time;
+		s64 min_offset = 0;
+		u32 min_offset_timescale = 0;
+		source->mp4 = gf_isom_open(src, GF_ISOM_OPEN_READ, 0);
+		if (!source->mp4)
+			return GF_FALSE;
+		source->nb_streams = 0;
+		source->real_time = force_real_time;
 		/*on MPEG-2 TS, carry 3GPP timed text as MPEG-4 Part17*/
-		gf_isom_text_set_streaming_mode(prog->mp4, 1);
-		nb_tracks = gf_isom_get_track_count(prog->mp4); 
+		gf_isom_text_set_streaming_mode(source->mp4, 1);
+		nb_tracks = gf_isom_get_track_count(source->mp4);
 
 		for (i=0; i<nb_tracks; i++) {
 			Bool check_deps = 0;
-			if (gf_isom_get_media_type(prog->mp4, i+1) == GF_ISOM_MEDIA_HINT) 
-				continue; 
+			if (gf_isom_get_media_type(source->mp4, i+1) == GF_ISOM_MEDIA_HINT)
+				continue;
 
-			fill_isom_es_ifce(prog, &prog->streams[i], prog->mp4, i+1, bifs_use_pes);
+			fill_isom_es_ifce(source, &source->streams[i], source->mp4, i+1, bifs_use_pes, compute_max_size);
+			if (!source->streams[i].input_udta) continue;
+			if (min_offset > ((GF_ESIMP4 *)source->streams[i].input_udta)->ts_offset) {
+				min_offset = ((GF_ESIMP4 *)source->streams[i].input_udta)->ts_offset;
+				min_offset_timescale = source->streams[i].timescale;
+			}
 
-			switch(prog->streams[i].stream_type) {
+			switch(source->streams[i].stream_type) {
 			case GF_STREAM_OD:
 				has_bifs_od = 1;
-				prog->streams[i].repeat_rate = carousel_rate;
+				source->streams[i].repeat_rate = carousel_rate;
 				break;
 			case GF_STREAM_SCENE:
 				has_bifs_od = 1;
-				prog->streams[i].repeat_rate = carousel_rate;
+				source->streams[i].repeat_rate = carousel_rate;
 				break;
 			case GF_STREAM_VISUAL:
 				/*turn on image repeat*/
-				switch (prog->streams[i].object_type_indication) {
+				switch (source->streams[i].object_type_indication) {
 				case GPAC_OTI_IMAGE_JPEG:
 				case GPAC_OTI_IMAGE_PNG:
-					((GF_ESIMP4 *)prog->streams[i].input_udta)->image_repeat_ms = carousel_rate;
+					((GF_ESIMP4 *)source->streams[i].input_udta)->image_repeat_ms = carousel_rate;
 					break;
 				default:
 					check_deps = 1;
-					if (gf_isom_get_sample_count(prog->mp4, i+1)>1) {
+					if (gf_isom_get_sample_count(source->mp4, i+1)>1) {
 						/*get first visual stream as PCR*/
-						if (!prog->pcr_idx) prog->pcr_idx = i+1;
+						if (!source->pcr_idx) {
+							source->pcr_idx = i+1;
+							if ((temi_id_1>=0) || (temi_id_2>=0)) {
+								temi_assigned = GF_TRUE;
+								((GF_ESIMP4 *)source->streams[i].input_udta)->timeline_id = (u32) ( (temi_id_1>=0) ? temi_id_1 + 1 : temi_id_2 + 1 );
+								((GF_ESIMP4 *)source->streams[i].input_udta)->insert_ntp = insert_ntp;
+
+								if (temi_url && (temi_id_1>=0))
+									((GF_ESIMP4 *)source->streams[i].input_udta)->temi_url = temi_url;
+
+								if (temi_id_1>=0) temi_id_1 = -1;
+								else temi_id_2 = -1;
+							}
+						}
 					}
 					break;
 				}
@@ -1275,60 +1569,78 @@ static Bool open_program(M2TSProgram *prog, char *src, u32 carousel_rate, u32 mp
 				/*log not supported stream type: %s*/
 				break;
 			}
-			prog->nb_streams++;
-			if (gf_isom_get_sample_count(prog->mp4, i+1)>1) first_other = i+1;
+			source->nb_streams++;
+			if (gf_isom_get_sample_count(source->mp4, i+1)>1) first_other = i+1;
 
 			if (check_deps) {
 				u32 k;
 				Bool found_dep = 0;
 				for (k=0; k<nb_tracks; k++) {
-					if (gf_isom_get_media_type(prog->mp4, k+1) != GF_ISOM_MEDIA_OD) 
-						continue; 
+					if (gf_isom_get_media_type(source->mp4, k+1) != GF_ISOM_MEDIA_OD)
+						continue;
 
 					/*this stream is not refered to by any OD, send as regular PES*/
-					if (gf_isom_has_track_reference(prog->mp4, k+1, GF_ISOM_REF_OD, gf_isom_get_track_id(prog->mp4, i+1) )==1) {
+					if (gf_isom_has_track_reference(source->mp4, k+1, GF_ISOM_REF_OD, gf_isom_get_track_id(source->mp4, i+1) )==1) {
 						found_dep = 1;
 						break;
 					}
 				}
 				if (!found_dep) {
-					prog->streams[i].caps |= GF_ESI_STREAM_WITHOUT_MPEG4_SYSTEMS;
+					source->streams[i].caps |= GF_ESI_STREAM_WITHOUT_MPEG4_SYSTEMS;
 				}
 			}
 		}
-		if (has_bifs_od && !prog->mpeg4_signaling) prog->mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_FULL;
+		if (has_bifs_od && !source->mpeg4_signaling) source->mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_FULL;
+		if ( !temi_assigned && first_audio && ((temi_id_1>=0) || (temi_id_2>=0) ) ) {
+			((GF_ESIMP4 *)source->streams[first_audio-1].input_udta)->timeline_id = (u32) ( (temi_id_1>=0) ? temi_id_1 + 1 : temi_id_2 + 1 );
+			((GF_ESIMP4 *)source->streams[first_audio-1].input_udta)->insert_ntp = insert_ntp;
 
-		/*if no visual PCR found, use first audio*/
-		if (!prog->pcr_idx) prog->pcr_idx = first_audio;
-		if (!prog->pcr_idx) prog->pcr_idx = first_other;
-		if (prog->pcr_idx) {
-			GF_ESIMP4 *priv;
-			prog->pcr_idx-=1;
-			priv = prog->streams[prog->pcr_idx].input_udta;
-			gf_isom_set_default_sync_track(prog->mp4, priv->track);
+			if (temi_url && (temi_id_1>=0) )
+				((GF_ESIMP4 *)source->streams[first_audio-1].input_udta)->temi_url = temi_url;
+
+			if (temi_id_1>=0) temi_id_1 = -1;
+			else temi_id_2 = -1;
 		}
 
-		prog->iod = gf_isom_get_root_od(prog->mp4);
-		if (prog->iod) {
-			GF_ObjectDescriptor*iod = (GF_ObjectDescriptor*)prog->iod;
-			if (gf_list_count( ((GF_ObjectDescriptor*)prog->iod)->ESDescriptors) == 0) {
-				gf_odf_desc_del(prog->iod);
-				prog->iod = NULL;
+		/*if no visual PCR found, use first audio*/
+		if (!source->pcr_idx) source->pcr_idx = first_audio;
+		if (!source->pcr_idx) source->pcr_idx = first_other;
+		if (source->pcr_idx) {
+			GF_ESIMP4 *priv;
+			source->pcr_idx-=1;
+			priv = source->streams[source->pcr_idx].input_udta;
+			gf_isom_set_default_sync_track(source->mp4, priv->track);
+		}
+
+		if (min_offset < 0) {
+			for (i=0; i<source->nb_streams; i++) {
+				Double scale = source->streams[i].timescale;
+				scale /= min_offset_timescale;
+				((GF_ESIMP4 *)source->streams[i].input_udta)->ts_offset += (s64) (-min_offset * scale);
+			}
+		}
+
+		source->iod = gf_isom_get_root_od(source->mp4);
+		if (source->iod) {
+			GF_ObjectDescriptor*iod = (GF_ObjectDescriptor*)source->iod;
+			if (gf_list_count( ((GF_ObjectDescriptor*)source->iod)->ESDescriptors) == 0) {
+				gf_odf_desc_del(source->iod);
+				source->iod = NULL;
 			} else {
 				fprintf(stderr, "IOD found for program %s\n", src);
 
 				/*if using 4over2, get rid of OD tracks*/
-				if (prog->mpeg4_signaling==GF_M2TS_MPEG4_SIGNALING_SCENE) {
+				if (source->mpeg4_signaling==GF_M2TS_MPEG4_SIGNALING_SCENE) {
 					for (i=0; i<gf_list_count(iod->ESDescriptors); i++) {
 						u32 track_num, k;
 						GF_M2TSDescriptor *oddesc;
 						GF_ISOSample *sample;
 						GF_ESD *esd = gf_list_get(iod->ESDescriptors, i);
 						if (esd->decoderConfig->streamType!=GF_STREAM_OD) continue;
-						track_num = gf_isom_get_track_by_id(prog->mp4, esd->ESID);
-						if (gf_isom_get_sample_count(prog->mp4, track_num)>1) continue;
+						track_num = gf_isom_get_track_by_id(source->mp4, esd->ESID);
+						if (gf_isom_get_sample_count(source->mp4, track_num)>1) continue;
 
-						sample = gf_isom_get_sample(prog->mp4, track_num, 1, NULL);
+						sample = gf_isom_get_sample(source->mp4, track_num, 1, NULL);
 						if (sample->dataLength >= 255-2) {
 							gf_isom_sample_del(&sample);
 							continue;
@@ -1339,26 +1651,26 @@ static Bool open_program(M2TSProgram *prog, char *src, u32 carousel_rate, u32 mp
 							if (dep_esd->dependsOnESID==esd->ESID) dep_esd->dependsOnESID = esd->dependsOnESID;
 						}
 
-						for (k=0; k<prog->nb_streams; k++) {
-							if (prog->streams[k].stream_id==esd->ESID) {
-								prog->streams[k].stream_type = 0;
+						for (k=0; k<source->nb_streams; k++) {
+							if (source->streams[k].stream_id==esd->ESID) {
+								source->streams[k].stream_type = 0;
 								break;
 							}
 						}
 
-						if (!prog->od_updates) prog->od_updates = gf_list_new();
-						GF_SAFEALLOC(oddesc, GF_M2TSDescriptor); 
+						if (!source->od_updates) source->od_updates = gf_list_new();
+						GF_SAFEALLOC(oddesc, GF_M2TSDescriptor);
 						oddesc->data_len = sample->dataLength;
 						oddesc->data = sample->data;
 						oddesc->tag = GF_M2TS_MPEG4_ODUPDATE_DESCRIPTOR;
 						sample->data = NULL;
 						gf_isom_sample_del(&sample);
-						gf_list_add(prog->od_updates, oddesc);
+						gf_list_add(source->od_updates, oddesc);
 
 						gf_list_rem(iod->ESDescriptors, i);
 						i--;
 						gf_odf_desc_del((GF_Descriptor *) esd);
-						prog->samples_count--;
+						source->samples_count--;
 					}
 				}
 
@@ -1366,26 +1678,28 @@ static Bool open_program(M2TSProgram *prog, char *src, u32 carousel_rate, u32 mp
 		}
 		return 1;
 	}
+#endif
+
 
 #ifndef GPAC_DISABLE_STREAMING
 	/*open SDP file*/
 	if (strstr(src, ".sdp")) {
 		GF_X_Attribute *att;
 		char *sdp_buf;
-		u32 sdp_size;
+		u32 sdp_size, i;
 		GF_Err e;
-		FILE *_sdp = fopen(src, "rt");
+		FILE *_sdp = gf_fopen(src, "rt");
 		if (!_sdp) {
 			fprintf(stderr, "Error opening %s - no such file\n", src);
 			return 0;
 		}
-		gf_f64_seek(_sdp, 0, SEEK_END);
-		sdp_size = (u32)gf_f64_tell(_sdp);
-		gf_f64_seek(_sdp, 0, SEEK_SET);
+		gf_fseek(_sdp, 0, SEEK_END);
+		sdp_size = (u32)gf_ftell(_sdp);
+		gf_fseek(_sdp, 0, SEEK_SET);
 		sdp_buf = (char*)gf_malloc(sizeof(char)*sdp_size);
 		memset(sdp_buf, 0, sizeof(char)*sdp_size);
-		sdp_size = fread(sdp_buf, 1, sdp_size, _sdp);
-		fclose(_sdp);
+		sdp_size = (u32) fread(sdp_buf, 1, sdp_size, _sdp);
+		gf_fclose(_sdp);
 
 		sdp = gf_sdp_info_new();
 		e = gf_sdp_info_parse(sdp, sdp_buf, sdp_size);
@@ -1410,220 +1724,241 @@ static Bool open_program(M2TSProgram *prog, char *src, u32 carousel_rate, u32 mp
 			buf64 = strstr(iod_str, ",");
 			if (!buf64) break;
 			buf64 += 1;
-			size64 = strlen(buf64) - 1;
+			size64 = (u32) strlen(buf64) - 1;
 			size = gf_base64_decode(buf64, size64, buf, 2000);
 
-			gf_odf_desc_read(buf, size, &prog->iod);
+			gf_odf_desc_read(buf, size, &source->iod);
 			break;
 		}
 
-		prog->nb_streams = gf_list_count(sdp->media_desc);
-		for (i=0; i<prog->nb_streams; i++) {
+		source->nb_streams = gf_list_count(sdp->media_desc);
+		for (i=0; i<source->nb_streams; i++) {
 			GF_SDPMedia *media = gf_list_get(sdp->media_desc, i);
-			fill_rtp_es_ifce(&prog->streams[i], media, sdp, prog);
-			switch(prog->streams[i].stream_type) {
+			fill_rtp_es_ifce(&source->streams[i], media, sdp, source);
+			switch(source->streams[i].stream_type) {
 			case GF_STREAM_OD:
 			case GF_STREAM_SCENE:
-				prog->mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_FULL;
-				prog->streams[i].repeat_rate = carousel_rate;
+				source->mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_FULL;
+				source->streams[i].repeat_rate = carousel_rate;
 				break;
 			}
-			if (!prog->pcr_idx && (prog->streams[i].stream_type == GF_STREAM_VISUAL)) {
-				prog->pcr_idx = i+1;
+			if (!source->pcr_idx && (source->streams[i].stream_type == GF_STREAM_VISUAL)) {
+				source->pcr_idx = i+1;
 			}
 		}
 
-		if (prog->pcr_idx) prog->pcr_idx-=1;
+		if (source->pcr_idx) source->pcr_idx-=1;
 		gf_sdp_info_del(sdp);
 
 		return 2;
-	} else 
+	} else
 #endif /*GPAC_DISABLE_STREAMING*/
 
 #ifndef GPAC_DISABLE_SENG
-	if (strstr(src, ".bt")) //open .bt file
-	{
-		u32 load_type=0;
-		prog->seng = gf_seng_init(prog, src, load_type, NULL, (load_type == GF_SM_LOAD_DIMS) ? 1 : 0);
-		if (!prog->seng) {
-			fprintf(stderr, "Cannot create scene engine\n");
-			exit(1);
-		}
-		else{
-			fprintf(stderr, "Scene engine created.\n");
-		}
-		assert( prog );
-		assert( prog->seng);
-		prog->iod = gf_seng_get_iod(prog->seng);
-		if (! prog->iod){
-		    fprintf(stderr, __FILE__": No IOD\n");
-		}
-
-		prog->nb_streams = gf_seng_get_stream_count(prog->seng);
-		prog->rate = carousel_rate;
-		prog->mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_FULL;
-
-		for (i=0; i<prog->nb_streams; i++) {
-			fill_seng_es_ifce(&prog->streams[i], i, prog->seng, prog->rate);
-			//fprintf(stderr, "Fill interface\n");
-			if (!prog->pcr_idx && (prog->streams[i].stream_type == GF_STREAM_AUDIO)) {
-				prog->pcr_idx = i+1;
+		if (strstr(src, ".bt")) //open .bt file
+		{
+			u32 i;
+			u32 load_type=0;
+			source->seng = gf_seng_init(source, src, load_type, NULL, (load_type == GF_SM_LOAD_DIMS) ? 1 : 0);
+			if (!source->seng) {
+				fprintf(stderr, "Cannot create scene engine\n");
+				exit(1);
 			}
-		}
-
-		/*when an audio input is present, declare it and store OD + ESD_U*/
-		if (audio_input_ip) {
-			/*add the audio program*/
-			prog->pcr_idx = prog->nb_streams;
-			prog->streams[prog->nb_streams].stream_type = GF_STREAM_AUDIO;
-			/*hack: http urls are not decomposed therefore audio_input_port remains null*/
-			if (audio_input_port) {	/*UDP/RTP*/
-				prog->streams[prog->nb_streams].object_type_indication = GPAC_OTI_AUDIO_MPEG1;
-			} else { /*HTTP*/
-				aac_reader->oti = prog->streams[prog->nb_streams].object_type_indication = GPAC_OTI_AUDIO_AAC_MPEG4;
+			else {
+				fprintf(stderr, "Scene engine created.\n");
 			}
-			prog->streams[prog->nb_streams].input_ctrl = void_input_ctrl;
-			prog->streams[prog->nb_streams].stream_id = AUDIO_DATA_ESID;
-			prog->streams[prog->nb_streams].timescale = 1000;
+			assert( source );
+			assert( source->seng);
+			source->iod = gf_seng_get_iod(source->seng);
+			if (! source->iod) {
+				fprintf(stderr, __FILE__": No IOD\n");
+			}
 
-			GF_SAFEALLOC(prog->streams[prog->nb_streams].input_udta, GF_ESIStream);
-			((GF_ESIStream*)prog->streams[prog->nb_streams].input_udta)->vers_inc = 1;	/*increment version number at every audio update*/
-			assert( prog );
-			//assert( prog->iod);
-			if (prog->iod && ((prog->iod->tag!=GF_ODF_IOD_TAG) || (mpeg4_signaling != GF_M2TS_MPEG4_SIGNALING_SCENE))) {
-				/*create the descriptor*/
-				GF_ESD *esd;
-				GF_SimpleDataDescriptor *audio_desc;
-				GF_SAFEALLOC(audio_desc, GF_SimpleDataDescriptor);
+			source->nb_streams = gf_seng_get_stream_count(source->seng);
+			source->rate = carousel_rate;
+			source->mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_FULL;
+
+			for (i=0; i<source->nb_streams; i++) {
+				fill_seng_es_ifce(&source->streams[i], i, source->seng, source->rate);
+				//fprintf(stderr, "Fill interface\n");
+				if (!source->pcr_idx && (source->streams[i].stream_type == GF_STREAM_AUDIO)) {
+					source->pcr_idx = i+1;
+				}
+			}
+
+#ifndef GPAC_DISABLE_PLAYER
+			/*when an audio input is present, declare it and store OD + ESD_U*/
+			if (audio_input_ip) {
+				/*add the audio program*/
+				source->pcr_idx = source->nb_streams;
+				source->streams[source->nb_streams].stream_type = GF_STREAM_AUDIO;
+				/*hack: http urls are not decomposed therefore audio_input_port remains null*/
 				if (audio_input_port) {	/*UDP/RTP*/
-					esd = gf_odf_desc_esd_new(0);
-					esd->decoderConfig->streamType = prog->streams[prog->nb_streams].stream_type;
-					esd->decoderConfig->objectTypeIndication = prog->streams[prog->nb_streams].object_type_indication;
-				} else {				/*HTTP*/
-					esd = AAC_GetESD(aac_reader);		/*in case of AAC, we have to wait the first ADTS chunk*/
+					source->streams[source->nb_streams].object_type_indication = GPAC_OTI_AUDIO_MPEG1;
+				} else { /*HTTP*/
+					aac_reader->oti = source->streams[source->nb_streams].object_type_indication = GPAC_OTI_AUDIO_AAC_MPEG4;
 				}
-				assert( esd );
-				esd->ESID = prog->streams[prog->nb_streams].stream_id;
-				if (esd->slConfig->timestampResolution) /*in case of AAC, we have to wait the first ADTS chunk*/
-					encode_audio_desc(esd, audio_desc);
-				else
-					gf_odf_desc_del((GF_Descriptor *)esd);
+				source->streams[source->nb_streams].input_ctrl = void_input_ctrl;
+				source->streams[source->nb_streams].stream_id = AUDIO_DATA_ESID;
+				source->streams[source->nb_streams].timescale = 1000;
 
-				/*find the audio OD stream and attach its descriptor*/
-				for (i=0; i<prog->nb_streams; i++) {
-					if (prog->streams[i].stream_id == AUDIO_OD_ESID) {
-						if (prog->streams[i].input_udta)
-						  gf_free(prog->streams[i].input_udta);
-						prog->streams[i].input_udta = (void*)audio_desc;	/*Hack: the real input_udta type (for our SampleCallBack function) is GF_ESIStream*/
-						audio_OD_stream_id = i;
-						break;
-					}
-				}
-				if (audio_OD_stream_id == (u32)-1) {
-					fprintf(stderr, "Error: could not find an audio OD stream with ESID=100 in '%s'\n", src);
+				GF_SAFEALLOC(source->streams[source->nb_streams].input_udta, GF_ESIStream);
+				if (!source->streams[source->nb_streams].input_udta) {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("Failed to allocate audio input handler\n"));
 					return 0;
 				}
-			} else {
-				prog->mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_SCENE;
+
+				((GF_ESIStream*)source->streams[source->nb_streams].input_udta)->vers_inc = 1;	/*increment version number at every audio update*/
+				assert( source );
+				//assert( source->iod);
+				if (source->iod && ((source->iod->tag!=GF_ODF_IOD_TAG) || (mpeg4_signaling != GF_M2TS_MPEG4_SIGNALING_SCENE))) {
+					/*create the descriptor*/
+					GF_ESD *esd;
+					GF_SimpleDataDescriptor *audio_desc;
+					GF_SAFEALLOC(audio_desc, GF_SimpleDataDescriptor);
+					if (audio_input_port) {	/*UDP/RTP*/
+						esd = gf_odf_desc_esd_new(0);
+						esd->decoderConfig->streamType = source->streams[source->nb_streams].stream_type;
+						esd->decoderConfig->objectTypeIndication = source->streams[source->nb_streams].object_type_indication;
+					} else {				/*HTTP*/
+						esd = AAC_GetESD(aac_reader);		/*in case of AAC, we have to wait the first ADTS chunk*/
+					}
+					assert( esd );
+					esd->ESID = source->streams[source->nb_streams].stream_id;
+					if (esd->slConfig->timestampResolution) /*in case of AAC, we have to wait the first ADTS chunk*/
+						encode_audio_desc(esd, audio_desc);
+					else
+						gf_odf_desc_del((GF_Descriptor *)esd);
+
+					/*find the audio OD stream and attach its descriptor*/
+					for (i=0; i<source->nb_streams; i++) {
+						if (source->streams[i].stream_id == AUDIO_OD_ESID) {
+							if (source->streams[i].input_udta)
+								gf_free(source->streams[i].input_udta);
+							source->streams[i].input_udta = (void*)audio_desc;	/*Hack: the real input_udta type (for our SampleCallBack function) is GF_ESIStream*/
+							audio_OD_stream_id = i;
+							break;
+						}
+					}
+					if (audio_OD_stream_id == (u32)-1) {
+						fprintf(stderr, "Error: could not find an audio OD stream with ESID=100 in '%s'\n", src);
+						return 0;
+					}
+				} else {
+					source->mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_SCENE;
+				}
+				source->nb_streams++;
 			}
-			prog->nb_streams++;
-		}
+#endif
 
-		/*when an audio input is present, declare it and store OD + ESD_U*/
-		if (video_buffer) {
-			/*add the video program*/
-			prog->streams[prog->nb_streams].stream_type = GF_STREAM_VISUAL;
-			prog->streams[prog->nb_streams].object_type_indication = GPAC_OTI_VIDEO_AVC;
-			prog->streams[prog->nb_streams].input_ctrl = void_input_ctrl;
-			prog->streams[prog->nb_streams].stream_id = VIDEO_DATA_ESID;
-			prog->streams[prog->nb_streams].timescale = 1000;
+			/*when an audio input is present, declare it and store OD + ESD_U*/
+			if (video_buffer) {
+				/*add the video program*/
+				source->streams[source->nb_streams].stream_type = GF_STREAM_VISUAL;
+				source->streams[source->nb_streams].object_type_indication = GPAC_OTI_VIDEO_AVC;
+				source->streams[source->nb_streams].input_ctrl = void_input_ctrl;
+				source->streams[source->nb_streams].stream_id = VIDEO_DATA_ESID;
+				source->streams[source->nb_streams].timescale = 1000;
 
-			GF_SAFEALLOC(prog->streams[prog->nb_streams].input_udta, GF_ESIStream);
-			((GF_ESIStream*)prog->streams[prog->nb_streams].input_udta)->vers_inc = 1;	/*increment version number at every video update*/
-			assert(prog);
+				GF_SAFEALLOC(source->streams[source->nb_streams].input_udta, GF_ESIStream);
+				if (!source->streams[source->nb_streams].input_udta) {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("Failed to allocate video input handler\n"));
+					return 0;
+				}
+				((GF_ESIStream*)source->streams[source->nb_streams].input_udta)->vers_inc = 1;	/*increment version number at every video update*/
+				assert(source);
 
-			if (prog->iod && ((prog->iod->tag!=GF_ODF_IOD_TAG) || (mpeg4_signaling != GF_M2TS_MPEG4_SIGNALING_SCENE))) {
-				assert(0); /*TODO*/
+				if (source->iod && ((source->iod->tag!=GF_ODF_IOD_TAG) || (mpeg4_signaling != GF_M2TS_MPEG4_SIGNALING_SCENE))) {
+					assert(0); /*TODO*/
 #if 0
-				/*create the descriptor*/
-				GF_ESD *esd;
-				GF_SimpleDataDescriptor *video_desc;
-				GF_SAFEALLOC(video_desc, GF_SimpleDataDescriptor);
-				esd = gf_odf_desc_esd_new(0);
-				esd->decoderConfig->streamType = prog->streams[prog->nb_streams].stream_type;
-				esd->decoderConfig->objectTypeIndication = prog->streams[prog->nb_streams].object_type_indication;
-				esd->ESID = prog->streams[prog->nb_streams].stream_id;
+					/*create the descriptor*/
+					GF_ESD *esd;
+					GF_SimpleDataDescriptor *video_desc;
+					GF_SAFEALLOC(video_desc, GF_SimpleDataDescriptor);
+					esd = gf_odf_desc_esd_new(0);
+					esd->decoderConfig->streamType = source->streams[source->nb_streams].stream_type;
+					esd->decoderConfig->objectTypeIndication = source->streams[source->nb_streams].object_type_indication;
+					esd->ESID = source->streams[source->nb_streams].stream_id;
 
-				/*find the audio OD stream and attach its descriptor*/
-				for (i=0; i<prog->nb_streams; i++) {
-					if (prog->streams[i].stream_id == 103/*TODO: VIDEO_OD_ESID*/) {
-						if (prog->streams[i].input_udta)
-						  gf_free(prog->streams[i].input_udta);
-						prog->streams[i].input_udta = (void*)video_desc;
-						audio_OD_stream_id = i;
-						break;
+					/*find the audio OD stream and attach its descriptor*/
+					for (i=0; i<source->nb_streams; i++) {
+						if (source->streams[i].stream_id == 103/*TODO: VIDEO_OD_ESID*/) {
+							if (source->streams[i].input_udta)
+								gf_free(source->streams[i].input_udta);
+							source->streams[i].input_udta = (void*)video_desc;
+							audio_OD_stream_id = i;
+							break;
+						}
 					}
-				}
-				if (audio_OD_stream_id == (u32)-1) {
-					fprintf(stderr, "Error: could not find an audio OD stream with ESID=100 in '%s'\n", src);
-					return 0;
-				}
+					if (audio_OD_stream_id == (u32)-1) {
+						fprintf(stderr, "Error: could not find an audio OD stream with ESID=100 in '%s'\n", src);
+						return 0;
+					}
 #endif
-			} else {
-				assert (prog->mpeg4_signaling == GF_M2TS_MPEG4_SIGNALING_SCENE);
+				} else {
+					assert (source->mpeg4_signaling == GF_M2TS_MPEG4_SIGNALING_SCENE);
+				}
+
+				source->nb_streams++;
 			}
 
-			prog->nb_streams++;
-		}
-
-		if (!prog->pcr_idx) prog->pcr_idx=1;
-		prog->th = gf_th_new("Carousel");
-		prog->src_name = update;
-		gf_th_run(prog->th, seng_output, prog);
-		return 1;
-	} else
+			if (!source->pcr_idx) source->pcr_idx=1;
+			source->th = gf_th_new("Carousel");
+			source->bifs_src_name = update;
+			gf_th_run(source->th, seng_output, source);
+			return 1;
+		} else
 #endif
-	{
-		FILE *f = fopen(src, "rt");
-		if (f) {
-			fclose(f);
-			fprintf(stderr, "Error opening %s - not a supported input media, skipping.\n", src);
-		} else {
-			fprintf(stderr, "Error opening %s - no such file.\n", src);
+		{
+			FILE *f = gf_fopen(src, "rt");
+			if (f) {
+				gf_fclose(f);
+				fprintf(stderr, "Error opening %s - not a supported input media, skipping.\n", src);
+			} else {
+				fprintf(stderr, "Error opening %s - no such file.\n", src);
+			}
+			return 0;
 		}
-		return 0;
-	}
 }
 
+#ifdef GPAC_MEMORY_TRACKING
+GF_MemTrackerType mem_track = GF_MemTrackerNone;
+#endif
+
+/*macro to keep retro compatibility with '=' and spaces in parse_args*/
+#define CHECK_PARAM(param) (!strnicmp(arg, param, strlen(param)) \
+        && (   ((arg[strlen(param)] == '=') && (next_arg = arg+strlen(param)+1)) \
+            || ((strlen(arg) == strlen(param)) && ++i && (i<argc) && (next_arg = argv[i]))))
+
 /*parse MP42TS arguments*/
-static GFINLINE GF_Err parse_args(int argc, char **argv, u32 *mux_rate, u32 *carrousel_rate, u64 *pcr_init_val, u32 *pcr_offset, u32 *psi_refresh_rate, Bool *single_au_pes, u32 *bifs_use_pes, 
-								  M2TSProgram *progs, u32 *nb_progs, char **src_name, 
-								  Bool *real_time, u32 *run_time, char **video_buffer, u32 *video_buffer_size,
-								  u32 *audio_input_type, char **audio_input_ip, u16 *audio_input_port,
-								  u32 *output_type, char **ts_out, char **udp_out, char **rtp_out, u16 *output_port, 
-								  char** segment_dir, u32 *segment_duration, char **segment_manifest, u32 *segment_number, char **segment_http_prefix, Bool *split_rap)
+static GFINLINE GF_Err parse_args(int argc, char **argv, u32 *mux_rate, u32 *carrousel_rate, s64 *pcr_init_val, u32 *pcr_offset, u32 *psi_refresh_rate, GF_M2TS_PackMode *pes_packing_mode, u32 *bifs_use_pes,
+                                  M2TSSource *sources, u32 *nb_sources, char **bifs_src_name,
+                                  Bool *real_time, u32 *run_time, char **video_buffer, u32 *video_buffer_size,
+                                  u32 *audio_input_type, char **audio_input_ip, u16 *audio_input_port,
+                                  u32 *output_type, char **ts_out, char **udp_out, char **rtp_out, u16 *output_port,
+                                  char** segment_dir, u32 *segment_duration, char **segment_manifest, u32 *segment_number, char **segment_http_prefix, u32 *split_rap, u32 *nb_pck_pack, u32 *pcr_ms, u32 *ttl, const char **ip_ifce, const char **temi_url, u32 *sdt_refresh_rate, Bool *enable_forced_pcr)
 {
-	Bool rate_found=0, mpeg4_carousel_found=0, time_found=0, src_found=0, dst_found=0, audio_input_found=0, video_input_found=0, 
-		 seg_dur_found=0, seg_dir_found=0, seg_manifest_found=0, seg_number_found=0, seg_http_found = 0, real_time_found=0;
-	char *prog_name, *arg = NULL, *error_msg = "no argument found";
-	u32 mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_NONE; 
+	Bool rate_found=0, mpeg4_carousel_found=0, time_found=0, src_found=0, dst_found=0, audio_input_found=0, video_input_found=0,
+	     seg_dur_found=0, seg_dir_found=0, seg_manifest_found=0, seg_number_found=0, seg_http_found=0, real_time_found=0, insert_ntp=0;
+	char *arg = NULL, *next_arg = NULL, *error_msg = "no argument found";
+	u32 mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_NONE;
 	Bool force_real_time = 0;
 	s32 i;
-	
+
 	/*first pass: find audio - NO GPAC INIT MODIFICATION MUST OCCUR IN THIS PASS*/
 	for (i=1; i<argc; i++) {
 		arg = argv[i];
 		if (!stricmp(arg, "-h") || strstr(arg, "-help")) {
-			usage(argv[0]);
+			usage();
 			return GF_EOS;
 		}
-		else if (!strnicmp(arg, "-pcr-init=", 10)) {
-			sscanf(arg, "-pcr-init="LLD, pcr_init_val);
+		else if (CHECK_PARAM("-pcr-init")) {
+			sscanf(next_arg, LLD, pcr_init_val);
 		}
-		else if (!strnicmp(arg, "-pcr-offset=", 12)) {
-			*pcr_offset = atoi(arg+12);
+		else if (CHECK_PARAM("-pcr-offset")) {
+			*pcr_offset = atoi(next_arg);
 		}
-		else if (!strnicmp(arg, "-video=", 7)) {
+		else if (CHECK_PARAM("-video")) {
 			FILE *f;
 			if (video_input_found) {
 				error_msg = "multiple '-video' found";
@@ -1631,270 +1966,364 @@ static GFINLINE GF_Err parse_args(int argc, char **argv, u32 *mux_rate, u32 *car
 				goto error;
 			}
 			video_input_found = 1;
-			arg+=7;
-			f = fopen(arg, "rb");
+			f = gf_fopen(next_arg, "rb");
 			if (!f) {
 				error_msg = "video file not found: ";
 				goto error;
 			}
-			gf_f64_seek(f, 0, SEEK_END);
-			*video_buffer_size = (u32)gf_f64_tell(f);
-			gf_f64_seek(f, 0, SEEK_SET);
+			gf_fseek(f, 0, SEEK_END);
+			*video_buffer_size = (u32)gf_ftell(f);
+			gf_fseek(f, 0, SEEK_SET);
 			assert(*video_buffer_size);
 			*video_buffer = (char*) gf_malloc(*video_buffer_size);
 			{
-				s32 readen = fread(*video_buffer, sizeof(char), *video_buffer_size, f);
-				if (readen != *video_buffer_size)
-					fprintf(stderr, "Error while reading video file, has readen %u chars instead of %u.\n", readen, *video_buffer_size);
+				s32 read = (u32) fread(*video_buffer, sizeof(char), *video_buffer_size, f);
+				if (read != *video_buffer_size)
+					fprintf(stderr, "Error while reading video file, has readen %u chars instead of %u.\n", read, *video_buffer_size);
 			}
-			fclose(f);
-		} else if (!strnicmp(arg, "-audio=", 7)) {
+			gf_fclose(f);
+		} else if (CHECK_PARAM("-audio")) {
 			if (audio_input_found) {
 				error_msg = "multiple '-audio' found";
 				arg = NULL;
 				goto error;
 			}
 			audio_input_found = 1;
-			arg+=7;
-			if (!strnicmp(arg, "udp://", 6) || !strnicmp(arg, "rtp://", 6) || !strnicmp(arg, "http://", 7)) {
+			if (!strnicmp(next_arg, "udp://", 6) || !strnicmp(next_arg, "rtp://", 6) || !strnicmp(next_arg, "http://", 7)) {
 				char *sep;
 				/*set audio input type*/
-				if (!strnicmp(arg, "udp://", 6))
+				if (!strnicmp(next_arg, "udp://", 6))
 					*audio_input_type = GF_MP42TS_UDP;
-				else if (!strnicmp(arg, "rtp://", 6))
+				else if (!strnicmp(next_arg, "rtp://", 6))
 					*audio_input_type = GF_MP42TS_RTP;
 #ifndef GPAC_DISABLE_PLAYER
-				else if (!strnicmp(arg, "http://", 7))
+				else if (!strnicmp(next_arg, "http://", 7))
 					*audio_input_type = GF_MP42TS_HTTP;
 #endif
 				/*http needs to get the complete URL*/
 				switch(*audio_input_type) {
-					case GF_MP42TS_UDP:
-					case GF_MP42TS_RTP:
-						sep = strchr(arg+6, ':');
-						*real_time=1;
-						if (sep) {
-							*audio_input_port = atoi(sep+1);
-							sep[0]=0;
-							*audio_input_ip = gf_strdup(arg+6);
-							sep[0]=':';
-						} else {
-							*audio_input_ip = gf_strdup(arg+6);
-						}
-						break;
+				case GF_MP42TS_UDP:
+				case GF_MP42TS_RTP:
+					sep = strchr(next_arg+6, ':');
+					*real_time=1;
+					if (sep) {
+						*audio_input_port = atoi(sep+1);
+						sep[0]=0;
+						*audio_input_ip = gf_strdup(next_arg+6);
+						sep[0]=':';
+					} else {
+						*audio_input_ip = gf_strdup(next_arg+6);
+					}
+					break;
 #ifndef GPAC_DISABLE_PLAYER
-					case GF_MP42TS_HTTP:
-						/* No need to dup since it may come from argv */
-						*audio_input_ip = arg;
-						assert(audio_input_port != 0);
-						break;
+				case GF_MP42TS_HTTP:
+					/* No need to dup since it may come from argv */
+					*audio_input_ip = next_arg;
+					assert(audio_input_port != 0);
+					break;
 #endif
-					default:
-						assert(0);
+				default:
+					assert(0);
 				}
 			}
-		} else if (!strnicmp(arg, "-psi-rate=", 10) ) {
-			*psi_refresh_rate = atoi(arg+10);
-		} else if (!stricmp(arg, "-bifs-pes") ) {
+		} else if (CHECK_PARAM("-psi-rate")) {
+			*psi_refresh_rate = atoi(next_arg);
+		} else if (!stricmp(arg, "-bifs-pes")) {
 			*bifs_use_pes = 1;
-		} else if (!stricmp(arg, "-bifs-pes-ex") ) {
+		} else if (!stricmp(arg, "-bifs-pes-ex")) {
 			*bifs_use_pes = 2;
 		} else if (!stricmp(arg, "-mpeg4") || !stricmp(arg, "-4on2")) {
 			mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_FULL;
 		} else if (!stricmp(arg, "-4over2")) {
 			mpeg4_signaling = GF_M2TS_MPEG4_SIGNALING_SCENE;
-		} else if (!strcmp(arg, "-mem-track")) {
+		} else if (!strcmp(arg, "-mem-track") || !strcmp(arg, "-mem-track-stack")) {
 #ifdef GPAC_MEMORY_TRACKING
 			gf_sys_close();
-			gf_sys_init(1);
-			gf_log_set_tool_level(GF_LOG_MEMORY, GF_LOG_DEBUG);
+            mem_track = !strcmp(arg, "-mem-track-stack") ? GF_MemTrackerBackTrace : GF_MemTrackerSimple;
+			gf_sys_init(mem_track);
+			gf_log_set_tool_level(GF_LOG_MEMORY, GF_LOG_INFO);
 #else
-			fprintf(stderr, "WARNING - GPAC not compiled with Memory Tracker - ignoring \"-mem-track\"\n"); 
+			fprintf(stderr, "WARNING - GPAC not compiled with Memory Tracker - ignoring \"%s\"\n", arg);
 #endif
-		} else if (!strnicmp(arg, "-rate=", 6)) {
+		} else if (CHECK_PARAM("-rate")) {
 			if (rate_found) {
 				error_msg = "multiple '-rate' found";
 				arg = NULL;
 				goto error;
 			}
 			rate_found = 1;
-			*mux_rate = 1024*atoi(arg+6);
-		} else if (!strnicmp(arg, "-mpeg4-carousel=", 16)) {
+			*mux_rate = 1000*atoi(next_arg);
+		} else if (CHECK_PARAM("-mpeg4-carousel")) {
 			if (mpeg4_carousel_found) {
 				error_msg = "multiple '-mpeg4-carousel' found";
 				arg = NULL;
 				goto error;
 			}
 			mpeg4_carousel_found = 1;
-			*carrousel_rate = atoi(arg+16);
+			*carrousel_rate = atoi(next_arg);
 		} else if (!strnicmp(arg, "-real-time", 10)) {
 			if (real_time_found) {
 				goto error;
 			}
 			real_time_found = 1;
 			*real_time = 1;
-		} else if (!strnicmp(arg, "-time=", 6)) {
+		} else if (CHECK_PARAM("-time")) {
 			if (time_found) {
 				error_msg = "multiple '-time' found";
 				arg = NULL;
 				goto error;
 			}
 			time_found = 1;
-			*run_time = atoi(arg+6);
+			*run_time = atoi(next_arg);
 		} else if (!stricmp(arg, "-single-au")) {
-			*single_au_pes = 1;
+			*pes_packing_mode = GF_M2TS_PACK_NONE;
+		} else if (!stricmp(arg, "-multi-au")) {
+			*pes_packing_mode = GF_M2TS_PACK_ALL;
 		} else if (!stricmp(arg, "-rap")) {
 			*split_rap = 1;
+		} else if (!stricmp(arg, "-flush-rap")) {
+			*split_rap = 2;
+		} else if (!stricmp(arg, "-force-pcr-only")) {
+			*enable_forced_pcr = GF_TRUE;
+		} else if (CHECK_PARAM("-nb-pack")) {
+			*nb_pck_pack = atoi(next_arg);
+		} else if (CHECK_PARAM("-nb-pck")) {
+			*nb_pck_pack = atoi(next_arg);
+		} else if (CHECK_PARAM("-pcr-ms")) {
+			*pcr_ms = atoi(next_arg);
+		} else if (CHECK_PARAM("-ttl")) {
+			*ttl = atoi(next_arg);
+		} else if (CHECK_PARAM("-ifce")) {
+			*ip_ifce = next_arg;
+		} else if (CHECK_PARAM("-sdt-rate")) {
+			*sdt_refresh_rate = atoi(next_arg);
+		}
+		else if (CHECK_PARAM("-logs")) {
+			if (gf_log_set_tools_levels(next_arg) != GF_OK)
+				return GF_BAD_PARAM;
+		} else if (CHECK_PARAM("-lf")) {
+			logfile = gf_fopen(next_arg, "wt");
+			gf_log_set_callback(logfile, on_gpac_log);
+		} else if (CHECK_PARAM("-segment-dir")) {
+			if (seg_dir_found) {
+				goto error;
+			}
+			seg_dir_found = 1;
+			*segment_dir = next_arg;
+			/* TODO: add the path separation char, if missing */
+		} else if (CHECK_PARAM("-segment-duration")) {
+			if (seg_dur_found) {
+				goto error;
+			}
+			seg_dur_found = 1;
+			*segment_duration = atoi(next_arg);
+		} else if (CHECK_PARAM("-segment-manifest")) {
+			if (seg_manifest_found) {
+				goto error;
+			}
+			seg_manifest_found = 1;
+			*segment_manifest = next_arg;
+		} else if (CHECK_PARAM("-segment-http-prefix")) {
+			if (seg_http_found) {
+				goto error;
+			}
+			seg_http_found = 1;
+			*segment_http_prefix = next_arg;
+		} else if (CHECK_PARAM("-segment-number")) {
+			if (seg_number_found) {
+				goto error;
+			}
+			seg_number_found = 1;
+			*segment_number = atoi(next_arg);
+		}
+		else if (CHECK_PARAM("-bifs-src")) {
+			if (src_found) {
+				error_msg = "multiple '-bifs-src' found";
+				arg = NULL;
+				goto error;
+			}
+			src_found = 1;
+			*bifs_src_name = next_arg;
+		} else if (CHECK_PARAM("-dst-file")) {
+			dst_found = 1;
+			*ts_out = gf_strdup(next_arg);
+		} else if (CHECK_PARAM("-temi")) {
+			if (next_arg[0]=='-') {
+				*temi_url = NULL;
+				i--;
+				temi_id_1 = 150;
+			} else {
+				u32 temi_id = 0;
+				if (sscanf(next_arg, "%d", &temi_id) == 1) {
+					if (temi_id < 0x80 || temi_id>0xFF) {
+						fprintf(stderr, "TEMI external timeline IDs shall be in the range [0x80, 0xFF], but %d was specified\n", temi_id);
+						return GF_BAD_PARAM;
+					}
+				}
+				if (!temi_id) {
+					*temi_url = next_arg;
+					if (strlen(next_arg) > 150) {
+						fprintf(stderr, "URLs longer than 150 bytes are not currently supported\n");
+						return GF_NOT_SUPPORTED;
+					}
+					temi_id_1 = 0;
+				} else {
+					temi_id_1 = temi_id;
+					*temi_url = NULL;
+				}
+			}
+		} else if (CHECK_PARAM("-temi2")) {
+			u32 temi_id = 0;
+			if (next_arg[0]=='-') {
+				fprintf(stderr, "No ID for secondary external TEMI timeline specified\n");
+				return GF_BAD_PARAM;
+			}
+			if (sscanf(next_arg, "%d", &temi_id) == 1) {
+				if (temi_id < 0x80 || temi_id>0xFF) {
+					fprintf(stderr, "TEMI external timeline IDs shall be in the range [0x80, 0xFF], but %d was specified\n", temi_id);
+					return GF_BAD_PARAM;
+				}
+				temi_id_2 = temi_id;
+			} else {
+				fprintf(stderr, "No ID for secondary external TEMI timeline specified\n");
+				return GF_BAD_PARAM;
+			}
+		} else if (CHECK_PARAM("-temi-delay")) {
+			temi_url_insertion_delay = atoi(next_arg);
+		} else if (CHECK_PARAM("-temi-offset")) {
+			temi_offset = atoi(next_arg);
+		} else if (!stricmp(arg, "-temi-noloop")) {
+			temi_disable_loop = 1;
+		} else if (!stricmp(arg, "-temi-off")) {
+			temi_on = GF_FALSE;
+		} else if (CHECK_PARAM("-temi-period")) {
+			temi_period = atof(next_arg);
+			if (temi_period<0) {
+				temi_period *= -1;
+				temi_single_toggle = GF_TRUE;
+			}
+		} else if (!stricmp(arg, "-insert-ntp")) {
+			insert_ntp = GF_TRUE;
+		}
+		else if (CHECK_PARAM("-dst-udp")) {
+			char *sep = strchr(next_arg, ':');
+			dst_found = 1;
+			*real_time=1;
+			if (sep) {
+				*output_port = atoi(sep+1);
+				sep[0]=0;
+				*udp_out = gf_strdup(next_arg);
+				sep[0]=':';
+			} else {
+				*udp_out = gf_strdup(next_arg);
+			}
+		}
+		else if (CHECK_PARAM("-dst-rtp")) {
+			char *sep = strchr(next_arg, ':');
+			dst_found = 1;
+			*real_time=1;
+			if (sep) {
+				*output_port = atoi(sep+1);
+				sep[0]=0;
+				*rtp_out = gf_strdup(next_arg);
+				sep[0]=':';
+			} else {
+				*rtp_out = gf_strdup(next_arg);
+			}
+		} else if (CHECK_PARAM("-src")) { //second pass arguments
+		} else if (CHECK_PARAM("-prog")) { //second pass arguments
+		}
+		else {
+			error_msg = "unknown option";
+			goto error;
 		}
 	}
 	if (*real_time) force_real_time = 1;
 	rate_found = 1;
 
-	/*second pass: other*/
-	for (i=1; i<argc; i++) {		
-		arg = argv[i];		
-		if (arg[0]=='-') {
-			if (!strnicmp(arg, "-logs=", 6)) {
-				if (gf_log_set_tools_levels(argv[i+1]+6) != GF_OK)
-					return GF_BAD_PARAM;
-			} else if (!strnicmp(arg, "-prog=", 6)) {
-				u32 res;
-				prog_name = arg+6;
-				res = open_program(&progs[*nb_progs], prog_name, *carrousel_rate, mpeg4_signaling, *src_name, *audio_input_ip, *audio_input_port, *video_buffer, force_real_time, *bifs_use_pes);
-				if (res) {
-					(*nb_progs)++;
-					if (res==2) *real_time=1;
-				}
-			} else if (!strnicmp(arg, "-segment-dir=", 13)) {
-				if (seg_dir_found) {
-					goto error;
-				}
-				seg_dir_found = 1;
-				*segment_dir = arg+13;
-				/* TODO: add the path separation char, if missing */
-			} else if (!strnicmp(arg, "-segment-duration=", 18)) {
-				if (seg_dur_found) {
-					goto error;
-				}
-				seg_dur_found = 1;
-				*segment_duration = atoi(arg+18);
-			} else if (!strnicmp(arg, "-segment-manifest=", 18)) {
-				if (seg_manifest_found) {
-					goto error;
-				}
-				seg_manifest_found = 1;
-				*segment_manifest = arg+18;
-			} else if (!strnicmp(arg, "-segment-http-prefix=", 21)) {
-				if (seg_http_found) {
-					goto error;
-				}
-				seg_http_found = 1;
-				*segment_http_prefix = arg+21;
-			} else if (!strnicmp(arg, "-segment-number=", 16)) {
-				if (seg_number_found) {
-					goto error;
-				}
-				seg_number_found = 1;
-				*segment_number = atoi(arg+16);
-			} 
-			else if (!strnicmp(arg, "-src=", 5)) {
-				if (src_found) {
-					error_msg = "multiple '-src' found";
-					arg = NULL;
-					goto error;
-				}
-				src_found = 1;
-				*src_name = arg+5;
-			}
-			else if (!strnicmp(arg, "-dst-file=", 10)) {
-				dst_found = 1;
-				*ts_out = gf_strdup(arg+10);
-			}
-			else if (!strnicmp(arg, "-dst-udp=", 9)) {
-				char *sep = strchr(arg+9, ':');
-				dst_found = 1;
-				*real_time=1;
-				if (sep) {
-					*output_port = atoi(sep+1);
-					sep[0]=0;
-					*udp_out = gf_strdup(arg+9);
-					sep[0]=':';
-				} else {
-					*udp_out = gf_strdup(arg+9);
-				}
-			}
-			else if (!strnicmp(arg, "-dst-rtp=", 9)) {
-				char *sep = strchr(arg+9, ':');
-				dst_found = 1;
-				*real_time=1;
-				if (sep) {
-					*output_port = atoi(sep+1);
-					sep[0]=0;
-					*rtp_out = gf_strdup(arg+9);
-					sep[0]=':';
-				} else {
-					*rtp_out = gf_strdup(arg+9);
-				}
-			}
-			else if (!strnicmp(arg, "-audio=", 7) || !strnicmp(arg, "-video=", 7) || !strnicmp(arg, "-mpeg4", 6))
-				; /*already treated on the first pass*/
-			else {
-//				error_msg = "unknown option \"%s\"";
-//				goto error;
-			}
-		} 
-#if 0
-		else { /*"dst" argument (output)*/
-			if (dst_found) {
-				error_msg = "multiple output arguments (no '-') found";
-				arg = NULL;
-				goto error;
-			}
-			dst_found = 1;
-			if (!strnicmp(arg, "rtp://", 6) || !strnicmp(arg, "udp://", 6)) {
-				char *sep = strchr(arg+6, ':');
-				*output_type = (arg[0]=='r') ? 2 : 1;
-				*real_time=1;
-				if (sep) {
-					*output_port = atoi(sep+1);
-					sep[0]=0;
-					*ts_out = gf_strdup(arg+6);
-					sep[0]=':';
-				} else {
-					*ts_out = gf_strdup(arg+6);
-				}
-			} else {
-				*output_type = 0;
-				*ts_out = gf_strdup(arg);
-			}
+	/*second pass: open sources*/
+	for (i=1; i<argc; i++) {
+		u32 res;
+		char *src_args;
+		arg = argv[i];
+		if (arg[0] !='-') continue;
+
+		if (! CHECK_PARAM("-src") && ! CHECK_PARAM("-prog") ) continue;
+
+		src_args = strchr(next_arg, ':');
+		if (src_args && (src_args[1]=='\\')) {
+			src_args = strchr(src_args+2, ':');
 		}
-#endif
+		if (src_args) {
+			src_args[0] = 0;
+			src_args = src_args + 1;
+		}
+
+		res = open_source(&sources[*nb_sources], next_arg, *carrousel_rate, mpeg4_signaling, *bifs_src_name, *audio_input_ip, *audio_input_port, *video_buffer, force_real_time, *bifs_use_pes, *temi_url, (*pcr_offset == (u32) -1) ? 1 : 0, insert_ntp);
+
+		//we may have arguments
+		while (src_args) {
+			char *sep = strchr(src_args, ':');
+			if (sep) sep[0] = 0;
+
+			if (!strnicmp(src_args, "name=", 5)) {
+				strncpy(sources[*nb_sources].program_name, src_args+5, 20);
+			} else if (!strnicmp(src_args, "provider=", 9)) {
+				strncpy(sources[*nb_sources].provider_name, src_args+9, 20);
+			} else if (!strnicmp(src_args, "ID=", 3)) {
+				u32 k;
+				sources[*nb_sources].ID = atoi(src_args+3);
+
+				for (k=0; k<*nb_sources; k++) {
+					if (sources[k].ID == sources[*nb_sources].ID) {
+						sources[*nb_sources].is_not_program_declaration = 1;
+						if (sources[k].max_sample_size < sources[*nb_sources].max_sample_size)
+							sources[k].max_sample_size = sources[*nb_sources].max_sample_size;
+
+						break;
+					}
+				}
+			} else if (!strnicmp(src_args, "disc", 4)) {
+				sources[*nb_sources].set_disc = GF_TRUE;
+			} else if (!strnicmp(src_args, "PMT=", 4)) {
+				sources[*nb_sources].pmt_version = atoi(src_args+4);
+			}
+
+			if (sep) {
+				sep[0] = ':';
+				src_args = sep+1;
+			} else
+				break;
+		}
+
+		if (res) {
+			(*nb_sources)++;
+			if (res==2) *real_time=1;
+		}
 	}
 	/*syntax is correct; now testing the presence of mandatory arguments*/
-	if (dst_found && *nb_progs && rate_found) {
+	if (dst_found && *nb_sources && rate_found) {
 		return GF_OK;
 	} else {
 		if (!dst_found)
-			fprintf(stderr, "Error: Destination argument not found\n\n");
-		if (! *nb_progs)
-			fprintf(stderr, "Error: No Programs are available\n\n");
-		if (!rate_found)
-			fprintf(stderr, "Error: Rate argument not found\n\n");
+			fprintf(stderr, "Error: Destination argument not found\n");
+		if (! *nb_sources)
+			fprintf(stderr, "Error: No Programs are available\n");
+		usage();
 		return GF_BAD_PARAM;
 	}
 
-error:	
+error:
 	if (!arg) {
-		fprintf(stderr, "Error: %s\n\n", error_msg);
+		fprintf(stderr, "Error: %s\n", error_msg);
 	} else {
-		fprintf(stderr, "Error: %s \"%s\"\n\n", error_msg, arg);
+		fprintf(stderr, "Error: %s \"%s\"\n", error_msg, arg);
 	}
 	return GF_BAD_PARAM;
 }
 
-/* adapted from http://svn.assembla.com/svn/legend/segmenter/segmenter.c */
-static GF_Err write_manifest(char *manifest, char *segment_dir, u32 segment_duration, char *segment_prefix, char *http_prefix, 
-							u32 first_segment, u32 last_segment, Bool end) {
+static GF_Err write_manifest(char *manifest, char *segment_dir, u32 segment_duration, char *segment_prefix, char *http_prefix, u32 first_segment, u32 last_segment, Bool end)
+{
 	FILE *manifest_fp;
 	u32 i;
 	char manifest_tmp_name[GF_MAX_PATH];
@@ -1909,7 +2338,7 @@ static GF_Err write_manifest(char *manifest, char *segment_dir, u32 segment_dura
 		sprintf(manifest_name, "%s", manifest);
 	}
 
-	manifest_fp = fopen(tmp_manifest, "w");
+	manifest_fp = gf_fopen(tmp_manifest, "w");
 	if (!manifest_fp) {
 		fprintf(stderr, "Could not create m3u8 manifest file (%s)\n", tmp_manifest);
 		return GF_BAD_PARAM;
@@ -1924,7 +2353,7 @@ static GF_Err write_manifest(char *manifest, char *segment_dir, u32 segment_dura
 	if (end) {
 		fprintf(manifest_fp, "#EXT-X-ENDLIST\n");
 	}
-	fclose(manifest_fp);
+	gf_fclose(manifest_fp);
 
 	if (!rename(tmp_manifest, manifest_name)) {
 		return GF_OK;
@@ -1947,11 +2376,14 @@ int main(int argc, char **argv)
 	/*   declarations   */
 	/********************/
 	const char *ts_pck;
+	char *ts_pack_buffer = NULL;
 	GF_Err e;
 	u32 run_time;
-	Bool real_time, single_au_pes, split_rap;
-	u64 pcr_init_val=0;
-	u32 i, j, mux_rate, nb_progs, cur_pid, carrousel_rate, last_print_time, last_video_time, bifs_use_pes, psi_refresh_rate;
+	Bool real_time, is_stdout;
+	s64 pcr_init_val = -1;
+	u32 usec_till_next, ttl, split_rap, sdt_refresh_rate;
+	GF_M2TS_PackMode pes_packing_mode;
+	u32 i, j, mux_rate, nb_sources, cur_pid, carrousel_rate, last_print_time, last_video_time, bifs_use_pes, psi_refresh_rate, nb_pck_pack, nb_pck_in_pack, pcr_ms;
 	char *ts_out = NULL, *udp_out = NULL, *rtp_out = NULL, *audio_input_ip = NULL;
 	FILE *ts_output_file = NULL;
 	GF_Socket *ts_output_udp_sk = NULL, *audio_input_udp_sk = NULL;
@@ -1966,30 +2398,34 @@ int main(int argc, char **argv)
 	u32 output_type, audio_input_type, pcr_offset;
 	char *audio_input_buffer = NULL;
 	u32 audio_input_buffer_length=65536;
-	char *src_name;
-	M2TSProgram progs[MAX_MUX_SRC_PROG];
+	char *bifs_src_name;
+	const char *insert_temi = 0;
+	M2TSSource sources[MAX_MUX_SRC_PROG];
 	u32 segment_duration, segment_index, segment_number;
 	char segment_manifest_default[GF_MAX_PATH];
 	char *segment_manifest, *segment_http_prefix, *segment_dir;
 	char segment_prefix[GF_MAX_PATH];
 	char segment_name[GF_MAX_PATH];
+	const char *ip_ifce = NULL;
 	GF_M2TS_Time prev_seg_time;
 	GF_M2TS_Mux *muxer;
-	
+	Bool enable_forced_pcr = GF_FALSE;
 	/*****************/
 	/*   gpac init   */
 	/*****************/
-	gf_sys_init(0);
+	gf_sys_init(GF_MemTrackerNone);
 	gf_log_set_tool_level(GF_LOG_ALL, GF_LOG_WARNING);
-	
+
 	/***********************/
 	/*   initialisations   */
 	/***********************/
-	real_time = 0;	
+	real_time = 0;
+	is_stdout = 0;
 	ts_output_file = NULL;
 	video_buffer = NULL;
 	last_video_time = 0;
 	audio_input_type = 0;
+	sdt_refresh_rate = 0;
 	ts_output_udp_sk = NULL;
 	udp_out = NULL;
 #ifndef GPAC_DISABLE_STREAMING
@@ -1997,8 +2433,8 @@ int main(int argc, char **argv)
 	rtp_out = NULL;
 #endif
 	ts_out = NULL;
-	src_name = NULL;
-	nb_progs = 0;
+	bifs_src_name = NULL;
+	nb_sources = 0;
 	mux_rate = 0;
 	run_time = 0;
 	carrousel_rate = 500;
@@ -2012,27 +2448,30 @@ int main(int argc, char **argv)
 	prev_seg_time.sec = 0;
 	prev_seg_time.nanosec = 0;
 	video_buffer_size = 0;
+	nb_pck_pack = 1;
+	pcr_ms = 100;
 #ifndef GPAC_DISABLE_PLAYER
 	aac_reader = AAC_Reader_new();
 #endif
 	muxer = NULL;
-	single_au_pes = 0;
+	pes_packing_mode = GF_M2TS_PACK_AUDIO_ONLY;
 	bifs_use_pes = 0;
 	split_rap = 0;
+	ttl = 1;
 	psi_refresh_rate = GF_M2TS_PSI_DEFAULT_REFRESH_RATE;
-	pcr_offset = DEFAULT_PCR_OFFSET;
+	pcr_offset = (u32) -1;
 
 	/***********************/
 	/*   parse arguments   */
 	/***********************/
-	if (GF_OK != parse_args(argc, argv, &mux_rate, &carrousel_rate, &pcr_init_val, &pcr_offset, &psi_refresh_rate, &single_au_pes, &bifs_use_pes, progs, &nb_progs, &src_name, 
-							&real_time, &run_time, &video_buffer, &video_buffer_size,
-							&audio_input_type, &audio_input_ip, &audio_input_port,
-							&output_type, &ts_out, &udp_out, &rtp_out, &output_port, 
-							&segment_dir, &segment_duration, &segment_manifest, &segment_number, &segment_http_prefix, &split_rap)) {
+	if (GF_OK != parse_args(argc, argv, &mux_rate, &carrousel_rate, &pcr_init_val, &pcr_offset, &psi_refresh_rate, &pes_packing_mode, &bifs_use_pes, sources, &nb_sources, &bifs_src_name,
+	                        &real_time, &run_time, &video_buffer, &video_buffer_size,
+	                        &audio_input_type, &audio_input_ip, &audio_input_port,
+	                        &output_type, &ts_out, &udp_out, &rtp_out, &output_port,
+	                        &segment_dir, &segment_duration, &segment_manifest, &segment_number, &segment_http_prefix, &split_rap, &nb_pck_pack, &pcr_ms, &ttl, &ip_ifce, &insert_temi, &sdt_refresh_rate, &enable_forced_pcr)) {
 		goto exit;
 	}
-	
+
 	if (run_time && !mux_rate) {
 		fprintf(stderr, "Cannot specify TS run time for VBR multiplex - disabling run time\n");
 		run_time = 0;
@@ -2042,15 +2481,19 @@ int main(int argc, char **argv)
 	/*   create mp42ts muxer   */
 	/***************************/
 	muxer = gf_m2ts_mux_new(mux_rate, psi_refresh_rate, real_time);
-	if (muxer) gf_m2ts_mux_use_single_au_pes_mode(muxer, single_au_pes);
-	if (pcr_init_val) gf_m2ts_mux_set_initial_pcr(muxer, pcr_init_val);
+	if (!muxer) {
+		fprintf(stderr, "Could not create the muxer. Aborting.\n");
+		goto exit;
+	}
+	gf_m2ts_mux_use_single_au_pes_mode(muxer, pes_packing_mode);
+	if (pcr_init_val>=0) gf_m2ts_mux_set_initial_pcr(muxer, (u64) pcr_init_val);
+	gf_m2ts_mux_set_pcr_max_interval(muxer, pcr_ms);
+	gf_m2ts_mux_enable_pcr_only_packets(muxer, enable_forced_pcr);
+
 
 	if (ts_out != NULL) {
 		if (segment_duration) {
-			char *dot;
 			strcpy(segment_prefix, ts_out);
-			dot = strrchr(segment_prefix, '.');
-			dot[0] = 0;
 			if (segment_dir) {
 				if (strchr("\\/", segment_name[strlen(segment_name)-1])) {
 					sprintf(segment_name, "%s%s_%d.ts", segment_dir, segment_prefix, segment_index);
@@ -2061,13 +2504,19 @@ int main(int argc, char **argv)
 				sprintf(segment_name, "%s_%d.ts", segment_prefix, segment_index);
 			}
 			ts_out = gf_strdup(segment_name);
-			if (!segment_manifest) { 
+			if (!segment_manifest) {
 				sprintf(segment_manifest_default, "%s.m3u8", segment_prefix);
 				segment_manifest = segment_manifest_default;
 			}
 			//write_manifest(segment_manifest, segment_dir, segment_duration, segment_prefix, segment_http_prefix, segment_index, 0, 0);
-		} 
-		ts_output_file = fopen(ts_out, "wb");
+		}
+		if (!strcmp(ts_out, "stdout") || !strcmp(ts_out, "-") ) {
+			ts_output_file = stdout;
+			is_stdout = GF_TRUE;
+		} else {
+			ts_output_file = gf_fopen(ts_out, "wb");
+			is_stdout = GF_FALSE;
+		}
 		if (!ts_output_file) {
 			fprintf(stderr, "Error opening %s\n", ts_out);
 			goto exit;
@@ -2076,9 +2525,9 @@ int main(int argc, char **argv)
 	if (udp_out != NULL) {
 		ts_output_udp_sk = gf_sk_new(GF_SOCK_TYPE_UDP);
 		if (gf_sk_is_multicast_address((char *)udp_out)) {
-			e = gf_sk_setup_multicast(ts_output_udp_sk, (char *)udp_out, output_port, 32, 0, NULL);
+			e = gf_sk_setup_multicast(ts_output_udp_sk, (char *)udp_out, output_port, ttl, 0, (char *) ip_ifce);
 		} else {
-			e = gf_sk_bind(ts_output_udp_sk, NULL, output_port, (char *)udp_out, output_port, GF_SOCK_REUSE_PORT);
+			e = gf_sk_bind(ts_output_udp_sk, ip_ifce, output_port, (char *)udp_out, output_port, GF_SOCK_REUSE_PORT);
 		}
 		if (e) {
 			fprintf(stderr, "Error initializing UDP socket: %s\n", gf_error_to_string(e));
@@ -2104,13 +2553,14 @@ int main(int argc, char **argv)
 			tr.client_port_last = output_port+1;
 		} else {
 			tr.source = (char *)rtp_out;
+			tr.TTL = ttl;
 		}
 		e = gf_rtp_setup_transport(ts_output_rtp, &tr, (char *)ts_out);
 		if (e != GF_OK) {
 			fprintf(stderr, "Cannot setup RTP transport info : %s\n", gf_error_to_string(e));
 			goto exit;
 		}
-		e = gf_rtp_initialize(ts_output_rtp, 0, 1, 1500, 0, 0, NULL);
+		e = gf_rtp_initialize(ts_output_rtp, 0, 1, 1500, 0, 0, (char *) ip_ifce);
 		if (e != GF_OK) {
 			fprintf(stderr, "Cannot initialize RTP sockets : %s\n", gf_error_to_string(e));
 			goto exit;
@@ -2127,7 +2577,7 @@ int main(int argc, char **argv)
 	/*   create streaming audio input   */
 	/************************************/
 	if (audio_input_ip)
-	switch(audio_input_type) {
+		switch(audio_input_type) {
 		case GF_MP42TS_UDP:
 			audio_input_udp_sk = gf_sk_new(GF_SOCK_TYPE_UDP);
 			if (gf_sk_is_multicast_address((char *)audio_input_ip)) {
@@ -2139,7 +2589,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "Error initializing UDP socket for %s:%d : %s\n", audio_input_ip, audio_input_port, gf_error_to_string(e));
 				goto exit;
 			}
-			gf_sk_set_buffer_size(audio_input_udp_sk, 0, UDP_BUFFER_SIZE);
+			gf_sk_set_buffer_size(audio_input_udp_sk, 0, GF_M2TS_UDP_BUFFER_SIZE);
 			gf_sk_set_block_mode(audio_input_udp_sk, 0);
 
 			/*allocate data buffer*/
@@ -2152,7 +2602,7 @@ int main(int argc, char **argv)
 			break;
 #ifndef GPAC_DISABLE_PLAYER
 		case GF_MP42TS_HTTP:
-			audio_prog = (void*)&progs[nb_progs-1];
+			audio_prog = (void*)&sources[nb_sources-1];
 			aac_download_file(aac_reader, audio_input_ip);
 			break;
 #endif
@@ -2161,42 +2611,83 @@ int main(int argc, char **argv)
 			break;
 		default:
 			assert(0);
+		}
+
+	if (!nb_sources) {
+		fprintf(stderr, "No program to mux, quitting.\n");
 	}
 
-	if (!nb_progs) {
-		fprintf(stderr, "No program to mux, quitting.\n");
+	for (i=0; i<nb_sources; i++) {
+		if (!sources[i].ID) {
+			for (j=i+1; j<nb_sources; j++) {
+				if (sources[i].ID < sources[j].ID) sources[i].ID = sources[i].ID+1;
+			}
+			if (!sources[i].ID) sources[i].ID = 1;
+		}
 	}
 
 	/****************************************/
 	/*   declare all streams to the muxer   */
 	/****************************************/
 	cur_pid = 100;	/*PIDs start from 100*/
-	for (i=0; i<nb_progs; i++) {
-		GF_M2TS_Mux_Program *program = gf_m2ts_mux_program_add(muxer, i+1, cur_pid, psi_refresh_rate, pcr_offset, progs[i].mpeg4_signaling);
-		if (progs[i].mpeg4_signaling) program->iod = progs[i].iod;
-		if (progs[i].od_updates) {
-			program->loop_descriptors = progs[i].od_updates;
-			progs[i].od_updates = NULL;
-		}
+	for (i=0; i<nb_sources; i++) {
+		GF_M2TS_Mux_Program *program;
 
-		for (j=0; j<progs[i].nb_streams; j++) {
+		if (! sources[i].is_not_program_declaration) {
+			u32 prog_pcr_offset = 0;
+			if (pcr_offset==(u32)-1) {
+				if (sources[i].max_sample_size && mux_rate) {
+					Double r = sources[i].max_sample_size * 8;
+					r *= 90000;
+					r/= mux_rate;
+					//add 10% of safety to cover TS signaling and other potential table update while sending the largest PES
+					r *= 1.1;
+					prog_pcr_offset = (u32) r;
+				}
+			} else {
+				prog_pcr_offset = pcr_offset;
+			}
+			fprintf(stderr, "Setting up program ID %d - send rates: PSI %d ms PCR %d ms - PCR offset %d\n", sources[i].ID, psi_refresh_rate, pcr_ms, prog_pcr_offset);
+
+			program = gf_m2ts_mux_program_add(muxer, sources[i].ID, cur_pid, psi_refresh_rate, prog_pcr_offset, sources[i].mpeg4_signaling, sources[i].pmt_version, sources[i].set_disc);
+			if (sources[i].mpeg4_signaling) program->iod = sources[i].iod;
+			if (sources[i].od_updates) {
+				program->loop_descriptors = sources[i].od_updates;
+				sources[i].od_updates = NULL;
+			}
+		} else {
+			program = gf_m2ts_mux_program_find(muxer, sources[i].ID);
+		}
+		if (!program) continue;
+
+		for (j=0; j<sources[i].nb_streams; j++) {
 			GF_M2TS_Mux_Stream *stream;
 			Bool force_pes_mode = 0;
 			/*likely an OD stream disabled*/
-			if (!progs[i].streams[j].stream_type) continue;
+			if (!sources[i].streams[j].stream_type) continue;
 
-			if (progs[i].streams[j].stream_type==GF_STREAM_SCENE) force_pes_mode = bifs_use_pes ? 1 : 0;
+			if (sources[i].streams[j].stream_type==GF_STREAM_SCENE) force_pes_mode = bifs_use_pes ? 1 : 0;
 
-			stream = gf_m2ts_program_stream_add(program, &progs[i].streams[j], cur_pid+j+1, (progs[i].pcr_idx==j) ? 1 : 0, force_pes_mode);
-			if (split_rap && (progs[i].streams[j].stream_type==GF_STREAM_VISUAL)) stream->start_pes_at_rap = 1;
+			stream = gf_m2ts_program_stream_add(program, &sources[i].streams[j], cur_pid+j+1, (sources[i].pcr_idx==j) ? 1 : 0, force_pes_mode);
+			if (split_rap && (sources[i].streams[j].stream_type==GF_STREAM_VISUAL)) stream->start_pes_at_rap = 1;
 		}
 
-		cur_pid += progs[i].nb_streams;
+		cur_pid += sources[i].nb_streams;
 		while (cur_pid % 10)
 			cur_pid ++;
-	}
 
+		if (sources[i].program_name[0] || sources[i].provider_name[0] ) gf_m2ts_mux_program_set_name(program, sources[i].program_name, sources[i].provider_name);
+	}
+	muxer->flush_pes_at_rap = (split_rap == 2) ? GF_TRUE : GF_FALSE;
+
+	if (sdt_refresh_rate) {
+		gf_m2ts_mux_enable_sdt(muxer, sdt_refresh_rate);
+	}
 	gf_m2ts_mux_update_config(muxer, 1);
+
+	if (nb_pck_pack>1) {
+		ts_pack_buffer = gf_malloc(sizeof(char) * 188 * nb_pck_pack);
+	}
 
 	/*****************/
 	/*   main loop   */
@@ -2209,42 +2700,58 @@ int main(int argc, char **argv)
 		if (audio_input_ip) {
 			u32 read;
 			switch (audio_input_type) {
-				case GF_MP42TS_UDP:
-				case GF_MP42TS_RTP:
-					/*e =*/gf_sk_receive(audio_input_udp_sk, audio_input_buffer, audio_input_buffer_length, 0, &read);
-					if (read) {
-						SampleCallBack((void*)&progs[nb_progs-1], AUDIO_DATA_ESID, audio_input_buffer, read, gf_m2ts_get_sys_clock(muxer));
-					}
-					break;
+			case GF_MP42TS_UDP:
+			case GF_MP42TS_RTP:
+				/*e =*/
+				gf_sk_receive(audio_input_udp_sk, audio_input_buffer, audio_input_buffer_length, 0, &read);
+				if (read) {
+					SampleCallBack((void*)&sources[nb_sources-1], AUDIO_DATA_ESID, audio_input_buffer, read, gf_m2ts_get_sys_clock(muxer));
+				}
+				break;
 #ifndef GPAC_DISABLE_PLAYER
-				case GF_MP42TS_HTTP:
-					/*nothing to do: AAC_OnLiveData is called automatically*/
-					/*check we're still alive*/
-					if (gf_dm_is_thread_dead(aac_reader->dnload)) {
-						GF_ESD *esd;
-						aac_download_file(aac_reader, audio_input_ip);
-						esd = AAC_GetESD(aac_reader);
-						if (!esd)
-							break;
-						assert(esd->slConfig->timestampResolution); /*if we don't have this value we won't be able to adjust the timestamps within the MPEG2-TS*/
-						if (esd->slConfig->timestampResolution)
-							audio_discontinuity_offset = gf_m2ts_get_sys_clock(muxer) * (u64)esd->slConfig->timestampResolution / 1000;
-						gf_odf_desc_del((GF_Descriptor *)esd);
-					}
-					break;
+			case GF_MP42TS_HTTP:
+				/*nothing to do: AAC_OnLiveData is called automatically*/
+				/*check we're still alive*/
+				if (gf_dm_is_thread_dead(aac_reader->dnload)) {
+					GF_ESD *esd;
+					aac_download_file(aac_reader, audio_input_ip);
+					esd = AAC_GetESD(aac_reader);
+					if (!esd)
+						break;
+					assert(esd->slConfig->timestampResolution); /*if we don't have this value we won't be able to adjust the timestamps within the MPEG2-TS*/
+					if (esd->slConfig->timestampResolution)
+						audio_discontinuity_offset = gf_m2ts_get_sys_clock(muxer) * (u64)esd->slConfig->timestampResolution / 1000;
+					gf_odf_desc_del((GF_Descriptor *)esd);
+				}
+				break;
 #endif
-				default:
-					assert(0);
+			default:
+				assert(0);
 			}
 		}
 
 		/*flush all packets*/
-		while ((ts_pck = gf_m2ts_mux_process(muxer, &status)) != NULL) {
+		nb_pck_in_pack=0;
+		while ((ts_pck = gf_m2ts_mux_process(muxer, &status, &usec_till_next)) != NULL) {
+
+			if (ts_pack_buffer) {
+				memcpy(ts_pack_buffer + 188 * nb_pck_in_pack, ts_pck, 188);
+				nb_pck_in_pack++;
+
+				if (nb_pck_in_pack < nb_pck_pack)
+					continue;
+
+				ts_pck = (const char *) ts_pack_buffer;
+			} else {
+				nb_pck_in_pack = 1;
+			}
+
+call_flush:
 			if (ts_output_file != NULL) {
-				gf_fwrite(ts_pck, 1, 188, ts_output_file); 
+				gf_fwrite(ts_pck, 1, 188 * nb_pck_in_pack, ts_output_file);
 				if (segment_duration && (muxer->time.sec > prev_seg_time.sec + segment_duration)) {
 					prev_seg_time = muxer->time;
-					fclose(ts_output_file);
+					gf_fclose(ts_output_file);
 					segment_index++;
 					if (segment_dir) {
 						if (strchr("\\/", segment_name[strlen(segment_name)-1])) {
@@ -2255,13 +2762,13 @@ int main(int argc, char **argv)
 					} else {
 						sprintf(segment_name, "%s_%d.ts", segment_prefix, segment_index);
 					}
-					ts_output_file = fopen(segment_name, "wb");
+					ts_output_file = gf_fopen(segment_name, "wb");
 					if (!ts_output_file) {
 						fprintf(stderr, "Error opening %s\n", segment_name);
 						goto exit;
 					}
 					/* delete the oldest segment */
-					if (segment_number && ((s32) (segment_index - segment_number - 1) >= 0)){
+					if (segment_number && ((s32) (segment_index - segment_number - 1) >= 0)) {
 						char old_segment_name[GF_MAX_PATH];
 						if (segment_dir) {
 							if (strchr("\\/", segment_name[strlen(segment_name)-1])) {
@@ -2274,14 +2781,14 @@ int main(int argc, char **argv)
 						}
 						gf_delete_file(old_segment_name);
 					}
-					write_manifest(segment_manifest, segment_dir, segment_duration, segment_prefix, segment_http_prefix, 
+					write_manifest(segment_manifest, segment_dir, segment_duration, segment_prefix, segment_http_prefix,
 //								   (segment_index >= segment_number/2 ? segment_index - segment_number/2 : 0), segment_index >1 ? segment_index-1 : 0, 0);
-								   ( (segment_index > segment_number ) ? segment_index - segment_number : 0), segment_index >1 ? segment_index-1 : 0, 0);
-				} 
+					               ( (segment_index > segment_number ) ? segment_index - segment_number : 0), segment_index >1 ? segment_index-1 : 0, 0);
+				}
 			}
 
 			if (ts_output_udp_sk != NULL) {
-				e = gf_sk_send(ts_output_udp_sk, (char*)ts_pck, 188); 
+				e = gf_sk_send(ts_output_udp_sk, (char*)ts_pck, 188 * nb_pck_in_pack);
 				if (e) {
 					fprintf(stderr, "Error %s sending UDP packet\n", gf_error_to_string(e));
 				}
@@ -2295,15 +2802,22 @@ int main(int argc, char **argv)
 				/*FIXME - better discontinuity check*/
 				hdr.Marker = (ts < hdr.TimeStamp) ? 1 : 0;
 				hdr.TimeStamp = ts;
-				e = gf_rtp_send_packet(ts_output_rtp, &hdr, (char*)ts_pck, 188, 0);
+				e = gf_rtp_send_packet(ts_output_rtp, &hdr, (char*)ts_pck, 188 * nb_pck_in_pack, 0);
 				if (e) {
 					fprintf(stderr, "Error %s sending RTP packet\n", gf_error_to_string(e));
 				}
 			}
 #endif
+
+			nb_pck_in_pack = 0;
+
 			if (status>=GF_M2TS_STATE_PADDING) {
 				break;
 			}
+		}
+		if (nb_pck_in_pack) {
+			ts_pck = (const char *) ts_pack_buffer;
+			goto call_flush;
 		}
 
 		/*push video*/
@@ -2312,20 +2826,37 @@ int main(int argc, char **argv)
 			if (now/MP42TS_VIDEO_FREQ != last_video_time/MP42TS_VIDEO_FREQ) {
 				/*should use carrousel behaviour instead of being pushed manually*/
 				if (video_buffer)
-					SampleCallBack((void*)&progs[nb_progs-1], VIDEO_DATA_ESID, video_buffer, video_buffer_size, gf_m2ts_get_sys_clock(muxer)+1000/*try buffering due to VLC msg*/);
+					SampleCallBack((void*)&sources[nb_sources-1], VIDEO_DATA_ESID, video_buffer, video_buffer_size, gf_m2ts_get_sys_clock(muxer)+1000/*try buffering due to VLC msg*/);
 				last_video_time = now;
 			}
 		}
 
 		if (real_time) {
-			/*refresh every MP42TS_PRINT_FREQ ms*/
+			/*refresh every MP42TS_PRINT_TIME_MS ms*/
 			u32 now=gf_sys_clock();
-			if (now/MP42TS_PRINT_FREQ != last_print_time/MP42TS_PRINT_FREQ) {
+			if (now > last_print_time + MP42TS_PRINT_TIME_MS) {
 				last_print_time = now;
-				fprintf(stderr, "M2TS: time %d - TS time %d - avg bitrate %d\r", gf_m2ts_get_sys_clock(muxer), gf_m2ts_get_ts_clock(muxer), muxer->avg_br);
+				fprintf(stderr, "M2TS: time % 6d - TS time % 6d - bitrate % 8d\r", gf_m2ts_get_sys_clock(muxer), gf_m2ts_get_ts_clock(muxer), muxer->average_birate_kbps);
+
+				if (gf_prompt_has_input()) {
+					char c = gf_prompt_get_char();
+					if (c=='q') break;
+					else if (c=='t') request_temi_toggle = GF_TRUE;
+				}
 			}
-			/*cpu load regulation*/
-			gf_sleep(1);
+			if (status == GF_M2TS_STATE_IDLE) {
+#if 0
+				/*wait till next packet is ready to be sent*/
+				if (usec_till_next>1000) {
+					//fprintf(stderr, "%d usec till next packet\n", usec_till_next);
+					gf_sleep(usec_till_next / 1000);
+				}
+#else
+				//we don't have enough precision on usec counting and we end up eating one core on most machines, so let's just sleep
+				//one second whenever we are idle - it's maybe too much but the muxer will catchup afterwards
+				gf_sleep(1);
+#endif
+			}
 		}
 
 
@@ -2342,17 +2873,19 @@ int main(int argc, char **argv)
 
 	{
 		u64 bits = muxer->tot_pck_sent*8*188;
-		u32 dur_sec = gf_m2ts_get_ts_clock(muxer) / 1000;
-		fprintf(stderr, "Done muxing - %d sec - average rate %d kbps "LLD" packets written\n", dur_sec, (u32) (bits/dur_sec/1000), muxer->tot_pck_sent);
-		fprintf(stderr, "\tPadding: "LLD" packets - "LLD" PES padded bytes (%g kbps)\n", muxer->tot_pad_sent, muxer->tot_pes_pad_bytes, (Double) (muxer->tot_pes_pad_bytes*8.0/dur_sec/1000) );
+		u64 dur_ms = gf_m2ts_get_ts_clock(muxer);
+		if (!dur_ms) dur_ms = 1;
+		fprintf(stderr, "Done muxing - %.02f sec - %sbitrate %d kbps "LLD" packets written\n", ((Double) dur_ms)/1000.0,mux_rate ? "" : "average ", (u32) (bits/dur_ms), muxer->tot_pck_sent);
+		fprintf(stderr, " Padding: "LLD" packets (%g kbps) - "LLD" PES padded bytes (%g kbps)\n", muxer->tot_pad_sent, (Double) (muxer->tot_pad_sent*188*8.0/dur_ms) , muxer->tot_pes_pad_bytes, (Double) (muxer->tot_pes_pad_bytes*8.0/dur_ms) );
 	}
 
 exit:
+	if (ts_pack_buffer) gf_free(ts_pack_buffer);
 	run = 0;
 	if (segment_duration) {
 		write_manifest(segment_manifest, segment_dir, segment_duration, segment_prefix, segment_http_prefix, segment_index - segment_number, segment_index, 1);
 	}
-	if (ts_output_file) fclose(ts_output_file);
+	if (ts_output_file && !is_stdout) gf_fclose(ts_output_file);
 	if (ts_output_udp_sk) gf_sk_del(ts_output_udp_sk);
 #ifndef GPAC_DISABLE_STREAMING
 	if (ts_output_rtp) gf_rtp_del(ts_output_rtp);
@@ -2365,35 +2898,48 @@ exit:
 #ifndef GPAC_DISABLE_STREAMING
 	if (rtp_out) gf_free(rtp_out);
 #endif
+	if (muxer) gf_m2ts_mux_del(muxer);
+
+	for (i=0; i<nb_sources; i++) {
+		for (j=0; j<sources[i].nb_streams; j++) {
+			if (sources[i].streams[j].input_ctrl) sources[i].streams[j].input_ctrl(&sources[i].streams[j], GF_ESI_INPUT_DESTROY, NULL);
+			if (sources[i].streams[j].input_udta) {
+				gf_free(sources[i].streams[j].input_udta);
+			}
+			if (sources[i].streams[j].decoder_config) {
+				gf_free(sources[i].streams[j].decoder_config);
+			}
+			if (sources[i].streams[j].sl_config) {
+				gf_free(sources[i].streams[j].sl_config);
+			}
+		}
+		if (sources[i].iod) gf_odf_desc_del((GF_Descriptor*)sources[i].iod);
+#ifndef GPAC_DISABLE_ISOM
+		if (sources[i].mp4) gf_isom_close(sources[i].mp4);
+#endif
+
+#ifndef GPAC_DISABLE_SENG
+		if (sources[i].seng) {
+			gf_seng_terminate(sources[i].seng);
+			sources[i].seng = NULL;
+		}
+#endif
+		if (sources[i].th) gf_th_del(sources[i].th);
+	}
+
 #ifndef GPAC_DISABLE_PLAYER
 	if (aac_reader) AAC_Reader_del(aac_reader);
 #endif
-	if (muxer) gf_m2ts_mux_del(muxer);
-	
-	for (i=0; i<nb_progs; i++) {
-		for (j=0; j<progs[i].nb_streams; j++) {
-			if (progs[i].streams[j].input_ctrl) progs[i].streams[j].input_ctrl(&progs[i].streams[j], GF_ESI_INPUT_DESTROY, NULL);
-			if (progs[i].streams[j].input_udta){
-			  gf_free(progs[i].streams[j].input_udta);
-			}
-			if (progs[i].streams[j].decoder_config) {
-			  gf_free(progs[i].streams[j].decoder_config);
-			}
-			if (progs[i].streams[j].sl_config) {
-			  gf_free(progs[i].streams[j].sl_config);
-			}
-		}
-		if (progs[i].iod) gf_odf_desc_del((GF_Descriptor*)progs[i].iod);
-		if (progs[i].mp4) gf_isom_close(progs[i].mp4);
-#ifndef GPAC_DISABLE_SENG
-		if (progs[i].seng){
-		    gf_seng_terminate(progs[i].seng);
-		    progs[i].seng = NULL;
-		}
-#endif
-		if (progs[i].th) gf_th_del(progs[i].th);
-	}
-	gf_sys_close();
-	return 1;
-}
 
+	if (logfile) gf_fclose(logfile);
+	gf_sys_close();
+
+#ifdef GPAC_MEMORY_TRACKING
+	if (mem_track && (gf_memory_size() || gf_file_handles_count() )) {
+	        gf_log_set_tool_level(GF_LOG_MEMORY, GF_LOG_INFO);
+		gf_memory_print();
+		return 2;
+	}
+#endif
+	return 0;
+}

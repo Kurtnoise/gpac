@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Cyril Concolato
- *			Copyright (c) Telecom ParisTech 2004-2012 
+ *			Copyright (c) Telecom ParisTech 2004-2012
  *					All rights reserved
  *
  *  This file is part of GPAC / SVG Scene Graph Generator sub-project
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -30,7 +30,7 @@ static FILE *BeginHtml()
 	char sPath[GF_MAX_PATH];
 
 	sprintf(sPath, "C:%cUsers%cCyril%ccontent%csvg%cregression%cregression_table.html", GF_PATH_SEPARATOR, GF_PATH_SEPARATOR, GF_PATH_SEPARATOR, GF_PATH_SEPARATOR, GF_PATH_SEPARATOR, GF_PATH_SEPARATOR);
-	f = fopen(sPath, "wt");
+	f = gf_fopen(sPath, "wt");
 
 	fprintf(f, "<?xml version='1.0' encoding='UTF-8'?>\n");
 	fprintf(f, "<html xmlns='http://www.w3.org/1999/xhtml'>\n");
@@ -47,7 +47,7 @@ static FILE *BeginHtml()
 
 	fprintf(f, "</head>\n");
 	fprintf(f, "<body>\n");
-    fprintf(f, "<h1 align='center'>Status of the SVG implementation in GPAC</h1>\n");
+	fprintf(f, "<h1 align='center'>Status of the SVG implementation in GPAC</h1>\n");
 	return f;
 }
 
@@ -55,7 +55,7 @@ static void EndHtml(FILE *f)
 {
 	fprintf(f, "</body>\n");
 	fprintf(f, "</html>\n");
-	fclose(f);
+	gf_fclose(f);
 }
 
 /* Generates an HTML table */
@@ -66,7 +66,7 @@ void generate_table(GF_List *elements)
 	FILE *f;
 	f = BeginHtml();
 
-	
+
 	fprintf(f, "<h2>Legend</h2>\n");
 	fprintf(f, "<table>\n");
 	fprintf(f, "<thead>\n");
@@ -111,7 +111,7 @@ void generate_table(GF_List *elements)
 		fprintf(f, "<td class='element-observation'>&nbsp;</td>\n");
 		fprintf(f, "<td class='element-example'>&nbsp;</td>\n");
 		fprintf(f, "<td class='element-bug'>&nbsp;</td>\n");
-		fprintf(f, "</tr>\n");		
+		fprintf(f, "</tr>\n");
 	}
 	fprintf(f, "</tbody>\n");
 	fprintf(f, "</table>\n");
@@ -140,7 +140,7 @@ void generate_table(GF_List *elements)
 			fprintf(f, "<td class='attribute-example'>%d - &nbsp;</td>\n",++nbExamples);
 			fprintf(f, "<td class='attribute-bug'>&nbsp;</td>\n");
 			fprintf(f, "</tr>\n");
-		}		
+		}
 		fprintf(f, "</tbody>\n");
 		fprintf(f, "</table>\n");
 	}

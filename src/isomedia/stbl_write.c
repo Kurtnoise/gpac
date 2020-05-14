@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -27,7 +27,7 @@
 
 #ifndef GPAC_DISABLE_ISOM
 
-/*macro used for table gf_realloc - we allocate much more than needed in order to keep the number of 
+/*macro used for table gf_realloc - we allocate much more than needed in order to keep the number of
 gf_realloc low, which greatly impacts performances for large files*/
 #define ALLOC_INC(a)	a = ((a<10) ? 100 : (a*3)/2);
 
@@ -37,7 +37,7 @@ gf_realloc low, which greatly impacts performances for large files*/
 //we could return an error if a sample with the same DTS already exists
 //but this is not true for QT or MJ2K, only for MP4...
 //we assume the authoring tool tries to create a compliant MP4 file.
-GF_Err stbl_AddDTS(GF_SampleTableBox *stbl, u64 DTS, u32 *sampleNumber, u32 LastAUDefDuration)
+GF_Err stbl_AddDTS(GF_SampleTableBox *stbl, u64 DTS, u32 *sampleNumber, u32 LastAUDefDuration, u32 nb_packed_samples)
 {
 	u32 i, j, sampNum;
 	u64 *DTSs, curDTS;
@@ -50,6 +50,9 @@ GF_Err stbl_AddDTS(GF_SampleTableBox *stbl, u64 DTS, u32 *sampleNumber, u32 Last
 	stts->r_FirstSampleInEntry = 0;
 
 	*sampleNumber = 0;
+	if (!nb_packed_samples)
+		nb_packed_samples=1;
+
 	//if we don't have an entry, that's the first one...
 	if (!stts->nb_entries) {
 		//assert the first DTS is 0. If not, that will break the whole file
@@ -58,27 +61,39 @@ GF_Err stbl_AddDTS(GF_SampleTableBox *stbl, u64 DTS, u32 *sampleNumber, u32 Last
 		stts->nb_entries = 1;
 		stts->entries = gf_malloc(sizeof(GF_SttsEntry));
 		if (!stts->entries) return GF_OUT_OF_MEM;
-		stts->entries[0].sampleCount = 1;
-		stts->entries[0].sampleDelta = LastAUDefDuration;
-		stts->w_currentSampleNum = (*sampleNumber) = 1;
+		stts->entries[0].sampleCount = nb_packed_samples;
+		stts->entries[0].sampleDelta = (nb_packed_samples>1) ? 0 : LastAUDefDuration;
+		(*sampleNumber) = 1;
+		stts->w_currentSampleNum = nb_packed_samples;
 		return GF_OK;
 	}
-
-	//check the last DTS...
-	if (DTS > stts->w_LastDTS) {
+	//check the last DTS - we allow 0-duration samples (same DTS)
+	if (DTS >= stts->w_LastDTS) {
 		ent = &stts->entries[stts->nb_entries-1];
+		if (!ent->sampleDelta && (ent->sampleCount>1)) {
+			ent->sampleDelta = (u32) ( DTS / ent->sampleCount);
+			stts->w_LastDTS = DTS - ent->sampleDelta;
+		}
 		//OK, we're adding at the end
 		if (DTS == stts->w_LastDTS + ent->sampleDelta) {
-			ent->sampleCount ++;
-			stts->w_currentSampleNum ++;
-			(*sampleNumber) = stts->w_currentSampleNum;
-			stts->w_LastDTS = DTS;
+			(*sampleNumber) = stts->w_currentSampleNum + 1;
+			ent->sampleCount += nb_packed_samples;
+			stts->w_currentSampleNum += nb_packed_samples;
+			stts->w_LastDTS = DTS + ent->sampleDelta * (nb_packed_samples-1);
 			return GF_OK;
 		}
 		//we need to split the entry
 		if (ent->sampleCount == 1) {
+			//FIXME - we need more tests with timed text
+#if 0
+			if (stts->w_LastDTS)
+				ent->sampleDelta += (u32) (DTS - stts->w_LastDTS);
+			else
+				ent->sampleDelta = (u32) DTS;
+#else
 			//use this one and adjust...
 			ent->sampleDelta = (u32) (DTS - stts->w_LastDTS);
+#endif
 			ent->sampleCount ++;
 			stts->w_currentSampleNum ++;
 			stts->w_LastDTS = DTS;
@@ -164,7 +179,7 @@ GF_Err stbl_AddDTS(GF_SampleTableBox *stbl, u64 DTS, u32 *sampleNumber, u32 Last
 	return GF_OK;
 }
 
-GF_Err AddCompositionOffset(GF_CompositionOffsetBox *ctts, u32 offset)
+GF_Err AddCompositionOffset(GF_CompositionOffsetBox *ctts, s32 offset)
 {
 	if (!ctts) return GF_BAD_PARAM;
 
@@ -177,16 +192,19 @@ GF_Err AddCompositionOffset(GF_CompositionOffsetBox *ctts, u32 offset)
 			if (!ctts->entries) return GF_OUT_OF_MEM;
 			memset(&ctts->entries[ctts->nb_entries], 0, sizeof(GF_DttsEntry)*(ctts->alloc_size-ctts->nb_entries) );
 		}
+		if (!ctts->entries) return GF_OUT_OF_MEM;
+
 		ctts->entries[ctts->nb_entries].decodingOffset = offset;
 		ctts->entries[ctts->nb_entries].sampleCount = 1;
 		ctts->nb_entries++;
 	}
+	if (offset<0) ctts->version=1;
 	ctts->w_LastSampleNumber++;
 	return GF_OK;
 }
 
 //adds a CTS offset for a new sample
-GF_Err stbl_AddCTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 CTSoffset)
+GF_Err stbl_AddCTS(GF_SampleTableBox *stbl, u32 sampleNumber, s32 offset)
 {
 	u32 i, j, sampNum, *CTSs;
 
@@ -200,10 +218,11 @@ GF_Err stbl_AddCTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 CTSoffset)
 			if (!ctts->entries) return GF_OUT_OF_MEM;
 			memset(&ctts->entries[ctts->nb_entries], 0, sizeof(GF_DttsEntry)*(ctts->alloc_size - ctts->nb_entries) );
 		}
-		ctts->entries[ctts->nb_entries].decodingOffset = CTSoffset;
+		ctts->entries[ctts->nb_entries].decodingOffset = offset;
 		ctts->entries[ctts->nb_entries].sampleCount = 1;
 		ctts->nb_entries++;
 		ctts->w_LastSampleNumber++;
+		if (offset<0) ctts->version=1;
 		return GF_OK;
 	}
 	//check if we're working in order...
@@ -212,7 +231,7 @@ GF_Err stbl_AddCTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 CTSoffset)
 		while (ctts->w_LastSampleNumber + 1 != sampleNumber) {
 			AddCompositionOffset(ctts, 0);
 		}
-		return AddCompositionOffset(ctts, CTSoffset);
+		return AddCompositionOffset(ctts, offset);
 	}
 
 	//NOPE we are inserting a sample...
@@ -227,15 +246,15 @@ GF_Err stbl_AddCTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 CTSoffset)
 				return GF_ISOM_INVALID_FILE;
 			}
 			if (sampNum+1==sampleNumber) {
-				CTSs[sampNum] = CTSoffset;
+				CTSs[sampNum] = offset;
 				sampNum ++;
 			}
 			CTSs[sampNum] = ctts->entries[i].decodingOffset;
 			sampNum ++;
 		}
 	}
-	
-	/*we will at most add 2 new entries (spliting of an existing one)*/
+
+	/*we will at most add 2 new entries (splitting of an existing one)*/
 	if (ctts->nb_entries+2>=ctts->alloc_size) {
 		ctts->alloc_size += 2;
 		ctts->entries = gf_realloc(ctts->entries, sizeof(GF_DttsEntry)*ctts->alloc_size);
@@ -257,10 +276,12 @@ GF_Err stbl_AddCTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 CTSoffset)
 		}
 	}
 	gf_free(CTSs);
-	
+
+	if (offset<0) ctts->version=1;
+
 	/*we've inserted a sample, therefore the last sample (n) has now number n+1
 	we cannot use SampleCount because we have probably skipped some samples
-	(we're calling AddCTS only if the sample has a CTSOffset !!!)*/
+	(we're calling AddCTS only if the sample has a offset !!!)*/
 	ctts->w_LastSampleNumber += 1;
 	return GF_OK;
 }
@@ -293,7 +314,7 @@ GF_Err stbl_unpackCTS(GF_SampleTableBox *stbl)
 	u32 i, j, remain, count;
 	GF_CompositionOffsetBox *ctts;
 	ctts = stbl->CompositionOffset;
-	if (ctts->unpack_mode) return GF_OK;
+	if (!ctts || ctts->unpack_mode) return GF_OK;
 	ctts->unpack_mode = 1;
 
 	packed = ctts->entries;
@@ -301,7 +322,7 @@ GF_Err stbl_unpackCTS(GF_SampleTableBox *stbl)
 	ctts->entries = NULL;
 	ctts->nb_entries = 0;
 	ctts->alloc_size = 0;
-	for (i=0;i<count; i++) {
+	for (i=0; i<count; i++) {
 		for (j=0; j<packed[i].sampleCount; j++) {
 			if (ctts->nb_entries == ctts->alloc_size) {
 				ALLOC_INC(ctts->alloc_size);
@@ -331,26 +352,34 @@ GF_Err stbl_unpackCTS(GF_SampleTableBox *stbl)
 }
 
 //add size
-GF_Err stbl_AddSize(GF_SampleSizeBox *stsz, u32 sampleNumber, u32 size)
+GF_Err stbl_AddSize(GF_SampleSizeBox *stsz, u32 sampleNumber, u32 size, u32 nb_pack_samples)
 {
 	u32 i, k;
 	u32 *newSizes;
-	if (!stsz || !size || !sampleNumber) return GF_BAD_PARAM;
+	if (!stsz /*|| !size */ || !sampleNumber) return GF_BAD_PARAM;
 
 	if (sampleNumber > stsz->sampleCount + 1) return GF_BAD_PARAM;
+
+	if (!nb_pack_samples) nb_pack_samples = 1;
+	else if (nb_pack_samples>1)
+		size /= nb_pack_samples;
 
 	//all samples have the same size
 	if (stsz->sizes == NULL) {
 		//1 first sample added in NON COMPACT MODE
 		if (! stsz->sampleCount && (stsz->type != GF_ISOM_BOX_TYPE_STZ2) ) {
-			stsz->sampleCount = 1;
+			stsz->sampleCount = nb_pack_samples;
 			stsz->sampleSize = size;
 			return GF_OK;
 		}
 		//2- sample has the same size
 		if (stsz->sampleSize == size) {
-			stsz->sampleCount++;
+			stsz->sampleCount += nb_pack_samples;
 			return GF_OK;
+		}
+		if (nb_pack_samples>1) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("[iso file] Inserting packed samples with different sizes is not yet supported\n" ));
+			return GF_NOT_SUPPORTED;
 		}
 		//3- no, need to alloc a size table
 		stsz->sizes = (u32*)gf_malloc(sizeof(u32) * (stsz->sampleCount + 1));
@@ -466,7 +495,7 @@ GF_Err stbl_AddRedundant(GF_SampleTableBox *stbl, u32 sampleNumber)
 		sdtp->sample_info = (u8*) gf_realloc(sdtp->sample_info, sizeof(u8) * (sdtp->sampleCount+missed) );
 		memset(&sdtp->sample_info[sdtp->sampleCount], 0, sizeof(u8) * missed );
 		while (missed) {
-			u8 isRAP;
+			SAPType isRAP;
 			if (stbl->SyncSample) stbl_GetSampleRAP(stbl->SyncSample, sdtp->sampleCount+1, &isRAP, NULL, NULL);
 			else isRAP = 1;
 			sdtp->sample_info[sdtp->sampleCount] = isRAP ? 0x20 : 0;
@@ -485,6 +514,78 @@ GF_Err stbl_AddRedundant(GF_SampleTableBox *stbl, u32 sampleNumber)
 		sdtp->sample_info[snum] = 0x29;
 	}
 	//update our list
+	sdtp->sampleCount ++;
+	return GF_OK;
+}
+
+GF_Err stbl_AddDependencyType(GF_SampleTableBox *stbl, u32 sampleNumber, u32 isLeading, u32 dependsOn, u32 dependedOn, u32 redundant)
+{
+	u32 flags;
+	GF_SampleDependencyTypeBox *sdtp;
+
+	if (stbl->SampleDep == NULL) {
+		stbl->SampleDep = (GF_SampleDependencyTypeBox *) gf_isom_box_new(GF_ISOM_BOX_TYPE_SDTP);
+		if (!stbl->SampleDep) return GF_OUT_OF_MEM;
+	}
+	sdtp = stbl->SampleDep;
+	if (sdtp->sampleCount + 1 < sampleNumber) {
+		u32 missed = sampleNumber-1 - sdtp->sampleCount;
+		sdtp->sample_info = (u8*) gf_realloc(sdtp->sample_info, sizeof(u8) * (sdtp->sampleCount+missed) );
+		memset(&sdtp->sample_info[sdtp->sampleCount], 0, sizeof(u8) * missed );
+		while (missed) {
+			SAPType isRAP;
+			if (stbl->SyncSample) stbl_GetSampleRAP(stbl->SyncSample, sdtp->sampleCount+1, &isRAP, NULL, NULL);
+			else isRAP = 1;
+			sdtp->sample_info[sdtp->sampleCount] = isRAP ? (2<<4) : 0;
+			if (isRAP) {
+				sdtp->sample_info[sdtp->sampleCount] = 0;
+
+			}
+			sdtp->sampleCount++;
+			missed--;
+		}
+	}
+
+	flags = 0;
+	flags |= isLeading << 6;
+	flags |= dependsOn << 4;
+	flags |= dependedOn << 2;
+	flags |= redundant;
+
+	sdtp->sample_info = (u8*) gf_realloc(sdtp->sample_info, sizeof(u8) * (sdtp->sampleCount + 1));
+	if (!sdtp->sample_info) return GF_OUT_OF_MEM;
+	if (sdtp->sampleCount < sampleNumber) {
+		sdtp->sample_info[sdtp->sampleCount] = flags;
+	} else {
+		u32 snum = sampleNumber-1;
+		memmove(sdtp->sample_info+snum+1, sdtp->sample_info+snum, sizeof(u8) * (sdtp->sampleCount - snum) );
+		sdtp->sample_info[snum] = flags;
+	}
+	//update our list
+	sdtp->sampleCount ++;
+	return GF_OK;
+}
+
+GF_Err stbl_AppendDependencyType(GF_SampleTableBox *stbl, u32 isLeading, u32 dependsOn, u32 dependedOn, u32 redundant)
+{
+	GF_SampleDependencyTypeBox *sdtp;
+	u32 flags;
+	if (stbl->SampleDep == NULL) {
+		stbl->SampleDep = (GF_SampleDependencyTypeBox *) gf_isom_box_new(GF_ISOM_BOX_TYPE_SDTP);
+		if (!stbl->SampleDep) return GF_OUT_OF_MEM;
+	}
+	sdtp = stbl->SampleDep;
+
+	flags = 0;
+	flags |= isLeading << 6;
+	flags |= dependsOn << 4;
+	flags |= dependedOn << 2;
+	flags |= redundant;
+
+
+	sdtp->sample_info = (u8*) gf_realloc(sdtp->sample_info, sizeof(u8) * (sdtp->sampleCount + 1));
+	if (!sdtp->sample_info) return GF_OUT_OF_MEM;
+	sdtp->sample_info[sdtp->sampleCount] = flags;
 	sdtp->sampleCount ++;
 	return GF_OK;
 }
@@ -514,20 +615,117 @@ GF_Err stbl_AddShadow(GF_ShadowSyncBox *stsh, u32 sampleNumber, u32 shadowNumber
 }
 
 //used in edit/write, where sampleNumber == chunkNumber
-GF_Err stbl_AddChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u32 StreamDescIndex, u64 offset)
+GF_Err stbl_AddChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u32 StreamDescIndex, u64 offset, u32 nb_pack_samples)
 {
 	GF_SampleTableBox *stbl;
 	GF_ChunkOffsetBox *stco;
 	GF_SampleToChunkBox *stsc;
 	GF_ChunkLargeOffsetBox *co64;
 	GF_StscEntry *ent;
-	u32 i, k, *newOff;
+	Bool needs_split = GF_TRUE;
+	u32 i, k, *newOff, new_chunk_idx=0;
 	u64 *newLarge;
+	s32 insert_idx = -1;
 
 	stbl = mdia->information->sampleTable;
 	stsc = stbl->SampleToChunk;
 
-	if (stsc->nb_entries + 1 < sampleNumber ) return GF_BAD_PARAM;
+//	if (stsc->w_lastSampleNumber + 1 < sampleNumber ) return GF_BAD_PARAM;
+	if (!nb_pack_samples)
+		nb_pack_samples = 1;
+
+	if (stsc->w_lastSampleNumber + 1 == sampleNumber ) needs_split = GF_TRUE;
+
+	if (!stsc->nb_entries || (stsc->nb_entries + (needs_split ? 2 : 0) >= stsc->alloc_size)) {
+		if (!stsc->alloc_size) stsc->alloc_size = 1;
+		ALLOC_INC(stsc->alloc_size);
+		stsc->entries = gf_realloc(stsc->entries, sizeof(GF_StscEntry)*stsc->alloc_size);
+		if (!stsc->entries) return GF_OUT_OF_MEM;
+		memset(&stsc->entries[stsc->nb_entries], 0, sizeof(GF_StscEntry)*(stsc->alloc_size-stsc->nb_entries) );
+	}
+	if (sampleNumber == stsc->w_lastSampleNumber + 1) {
+		ent = &stsc->entries[stsc->nb_entries];
+		stsc->w_lastChunkNumber ++;
+		ent->firstChunk = stsc->w_lastChunkNumber;
+		if (stsc->nb_entries) stsc->entries[stsc->nb_entries-1].nextChunk = stsc->w_lastChunkNumber;
+
+		new_chunk_idx = stsc->w_lastChunkNumber;
+		stsc->w_lastSampleNumber = sampleNumber + nb_pack_samples-1;
+		stsc->nb_entries += 1;
+	} else {
+		u32 cur_samp = 1;
+		u32 samples_in_next_entry = 0;
+		u32 next_entry_first_chunk = 1;
+		for (i=0; i<stsc->nb_entries; i++) {
+			u32 k, nb_chunks = 1;
+			ent = &stsc->entries[i];
+			if (i+1<stsc->nb_entries) nb_chunks = stsc->entries[i+1].firstChunk - ent->firstChunk;
+			for (k=0; k<nb_chunks; k++) {
+				if ((cur_samp <= sampleNumber) && (ent->samplesPerChunk + cur_samp > sampleNumber)) {
+					insert_idx = i;
+					//stsc entry has samples before inserted sample, split
+					if (sampleNumber>cur_samp) {
+						samples_in_next_entry = ent->samplesPerChunk - (sampleNumber-cur_samp);
+						ent->samplesPerChunk = sampleNumber-cur_samp;
+					}
+					break;
+				}
+				cur_samp += ent->samplesPerChunk;
+				next_entry_first_chunk++;
+			}
+			if (insert_idx>=0) break;
+		}
+		//we need to split the entry
+		if (samples_in_next_entry) {
+			memmove(&stsc->entries[insert_idx+3], &stsc->entries[insert_idx+1], sizeof(GF_StscEntry)*(stsc->nb_entries - insert_idx - 1));
+			//copy over original entry
+			ent = &stsc->entries[insert_idx];
+			stsc->entries[insert_idx+2] = *ent;
+			stsc->entries[insert_idx+2].samplesPerChunk = samples_in_next_entry;
+			stsc->entries[insert_idx+2].firstChunk = next_entry_first_chunk + 1;
+
+			//setup new entry
+			ent = &stsc->entries[insert_idx+1];
+			ent->firstChunk = next_entry_first_chunk;
+
+			stsc->nb_entries += 2;
+		} else {
+			if (insert_idx<0) {
+				ent = &stsc->entries[stsc->nb_entries];
+				insert_idx = stsc->nb_entries;
+			} else {
+				memmove(&stsc->entries[insert_idx+1], &stsc->entries[insert_idx], sizeof(GF_StscEntry)*(stsc->nb_entries+1-insert_idx));
+				ent = &stsc->entries[insert_idx+1];
+			}
+
+			ent->firstChunk = next_entry_first_chunk;
+			stsc->nb_entries += 1;
+		}
+		new_chunk_idx = next_entry_first_chunk;
+	}
+	ent->isEdited = (Media_IsSelfContained(mdia, StreamDescIndex)) ? 1 : 0;
+	ent->sampleDescriptionIndex = StreamDescIndex;
+	ent->samplesPerChunk = nb_pack_samples;
+	ent->nextChunk = ent->firstChunk+1;
+
+	//OK, now if we've inserted a chunk, update the sample to chunk info...
+	if (sampleNumber + nb_pack_samples - 1 == stsc->w_lastSampleNumber) {
+		if (stsc->nb_entries)
+			stsc->entries[stsc->nb_entries-1].nextChunk = ent->firstChunk;
+
+		stbl->SampleToChunk->currentIndex = stsc->nb_entries-1;
+		stbl->SampleToChunk->firstSampleInCurrentChunk = sampleNumber;
+		//write - edit mode: sample number = chunk number
+		stbl->SampleToChunk->currentChunk = stsc->w_lastChunkNumber;
+		stbl->SampleToChunk->ghostNumber = 1;
+	} else {
+		/*offset remaining entries*/
+		for (i = insert_idx+1; i<stsc->nb_entries+1; i++) {
+			stsc->entries[i].firstChunk++;
+			if (i+1<stsc->nb_entries)
+				stsc->entries[i-1].nextChunk = stsc->entries[i].firstChunk;
+		}
+	}
 
 	//add the offset to the chunk...
 	//and we change our offset
@@ -541,8 +739,8 @@ GF_Err stbl_AddChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u32 StreamDescIn
 			co64->offsets = (u64*)gf_malloc(sizeof(u64) * co64->nb_entries);
 			if (!co64->offsets) return GF_OUT_OF_MEM;
 			k = 0;
-			for (i=0;i<stco->nb_entries; i++) {
-				if (i + 1 == sampleNumber) {
+			for (i=0; i<stco->nb_entries; i++) {
+				if (i + 1 == new_chunk_idx) {
 					co64->offsets[i] = offset;
 					k = 1;
 				}
@@ -553,7 +751,7 @@ GF_Err stbl_AddChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u32 StreamDescIn
 			stbl->ChunkOffset = (GF_Box *) co64;
 		} else {
 			//no, we can use this one.
-			if (sampleNumber > stco->nb_entries) {
+			if (new_chunk_idx > stco->nb_entries) {
 				if (!stco->alloc_size) stco->alloc_size = stco->nb_entries;
 				if (stco->nb_entries == stco->alloc_size) {
 					ALLOC_INC(stco->alloc_size);
@@ -569,7 +767,7 @@ GF_Err stbl_AddChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u32 StreamDescIn
 				if (!newOff) return GF_OUT_OF_MEM;
 				k=0;
 				for (i=0; i<stco->nb_entries; i++) {
-					if (i+1 == sampleNumber) {
+					if (i+1 == new_chunk_idx) {
 						newOff[i] = (u32) offset;
 						k=1;
 					}
@@ -600,7 +798,7 @@ GF_Err stbl_AddChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u32 StreamDescIn
 			if (!newLarge) return GF_OUT_OF_MEM;
 			k=0;
 			for (i=0; i<co64->nb_entries; i++) {
-				if (i+1 == sampleNumber) {
+				if (i+1 == new_chunk_idx) {
 					newLarge[i] = offset;
 					k=1;
 				}
@@ -613,43 +811,6 @@ GF_Err stbl_AddChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u32 StreamDescIn
 		}
 	}
 
-	if (stsc->nb_entries==stsc->alloc_size) {
-		ALLOC_INC(stsc->alloc_size);
-		stsc->entries = gf_realloc(stsc->entries, sizeof(GF_StscEntry)*stsc->alloc_size);
-		if (!stsc->entries) return GF_OUT_OF_MEM;
-		memset(&stsc->entries[stsc->nb_entries], 0, sizeof(GF_StscEntry)*(stsc->alloc_size-stsc->nb_entries) );
-	}
-	if (sampleNumber == stsc->nb_entries + 1) {
-		ent = &stsc->entries[stsc->nb_entries];
-	} else {
-		memmove(&stsc->entries[sampleNumber], &stsc->entries[sampleNumber-1], sizeof(GF_StscEntry)*(stsc->nb_entries+1-sampleNumber));
-		ent = &stsc->entries[sampleNumber-1];
-	}
-	ent->isEdited = 0;
-	ent->isEdited = (Media_IsSelfContained(mdia, StreamDescIndex)) ? 1 : 0;
-	ent->sampleDescriptionIndex = StreamDescIndex;
-	ent->samplesPerChunk = 1;
-	ent->firstChunk = sampleNumber;
-	ent->nextChunk = sampleNumber + 1;
-
-	//OK, now if we've inserted a chunk, update the sample to chunk info...
-	if (sampleNumber == stsc->nb_entries + 1) {
-		ent->nextChunk = stsc->nb_entries + 1;
-		if (stsc->nb_entries) 
-			stsc->entries[stsc->nb_entries-1].nextChunk = ent->firstChunk;
-
-		stbl->SampleToChunk->currentIndex = stsc->nb_entries;
-		stbl->SampleToChunk->firstSampleInCurrentChunk = sampleNumber;
-		//write - edit mode: sample number = chunk number
-		stbl->SampleToChunk->currentChunk = sampleNumber;
-		stbl->SampleToChunk->ghostNumber = 1;
-	} else {
-		/*offset remaining entries*/
-		for (i = sampleNumber; i<stsc->nb_entries+1; i++) {
-			stsc->entries[i].firstChunk++;
-		}
-	}
-	stsc->nb_entries++;
 	return GF_OK;
 }
 
@@ -680,7 +841,7 @@ GF_Err stbl_SetChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u64 offset)
 			co64->alloc_size = co64->nb_entries;
 			co64->offsets = (u64*)gf_malloc(sizeof(u64)*co64->nb_entries);
 			if (!co64->offsets) return GF_OUT_OF_MEM;
-			for (i=0;i<co64->nb_entries; i++) {
+			for (i=0; i<co64->nb_entries; i++) {
 				co64->offsets[i] = (u64) ((GF_ChunkOffsetBox *)stbl->ChunkOffset)->offsets[i];
 			}
 			co64->offsets[ent->firstChunk - 1] = offset;
@@ -696,7 +857,7 @@ GF_Err stbl_SetChunkOffset(GF_MediaBox *mdia, u32 sampleNumber, u64 offset)
 }
 
 
-GF_Err stbl_SetSampleCTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 offset)
+GF_Err stbl_SetSampleCTS(GF_SampleTableBox *stbl, u32 sampleNumber, s32 offset)
 {
 	GF_CompositionOffsetBox *ctts = stbl->CompositionOffset;
 
@@ -710,6 +871,7 @@ GF_Err stbl_SetSampleCTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 offset)
 		}
 		return AddCompositionOffset(ctts, offset);
 	}
+	if (offset<0) ctts->version=1;
 	ctts->entries[sampleNumber-1].decodingOffset = offset;
 	return GF_OK;
 }
@@ -750,7 +912,7 @@ GF_Err stbl_SetSampleRAP(GF_SyncSampleBox *stss, u32 SampleNumber, u8 isRAP)
 		if (isRAP) return GF_OK;
 		/*remove it...*/
 		if (i+1 < stss->nb_entries)
-			memcpy(stss->sampleNumbers + i, stss->sampleNumbers + i + 1, sizeof(u32) * (stss->nb_entries - i - 1));
+			memmove(stss->sampleNumbers + i, stss->sampleNumbers + i + 1, sizeof(u32) * (stss->nb_entries - i - 1));
 		stss->nb_entries--;
 		return GF_OK;
 	}
@@ -764,7 +926,7 @@ GF_Err stbl_SetSampleRAP(GF_SyncSampleBox *stss, u32 SampleNumber, u8 isRAP)
 	}
 
 	if (i+1 < stss->nb_entries)
-		memcpy(stss->sampleNumbers + i + 1, stss->sampleNumbers + i, sizeof(u32) * (stss->nb_entries - i - 1));
+		memmove(stss->sampleNumbers + i + 1, stss->sampleNumbers + i, sizeof(u32) * (stss->nb_entries - i - 1));
 	stss->sampleNumbers[i] = SampleNumber;
 	stss->nb_entries ++;
 	return GF_OK;
@@ -822,7 +984,7 @@ GF_Err stbl_RemoveDTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 LastAUDefDu
 
 	stts = stbl->TimeToSample;
 
-	//we're removing the only sample: empty the sample table 
+	//we're removing the only sample: empty the sample table
 	if (stbl->SampleSize->sampleCount == 1) {
 		stts->nb_entries = 0;
 		stts->r_FirstSampleInEntry = stts->r_currentEntryIndex = 0;
@@ -838,10 +1000,13 @@ GF_Err stbl_RemoveDTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 LastAUDefDu
 		//unpack the DTSs...
 		DTSs = (u64*)gf_malloc(sizeof(u64) * (stbl->SampleSize->sampleCount - 1));
 		if (!DTSs) return GF_OUT_OF_MEM;
+		memset(DTSs, 0, sizeof(u64) * (stbl->SampleSize->sampleCount - 1) );
+
 		curDTS = 0;
 		sampNum = 0;
 		ent = NULL;
 		k=0;
+
 		for (i=0; i<stts->nb_entries; i++) {
 			ent = & stts->entries[i];
 			for (j=0; j<ent->sampleCount; j++) {
@@ -862,26 +1027,36 @@ GF_Err stbl_RemoveDTS(GF_SampleTableBox *stbl, u32 sampleNumber, u32 LastAUDefDu
 		} else {
 			stts->entries[0].sampleDelta = (u32) DTSs[1] /*- DTS[0]==0 */;
 		}
-		for (i=0; i<stbl->SampleSize->sampleCount-1; i++) {
+		sampNum = 1;
+		for (i=1; i<stbl->SampleSize->sampleCount-1; i++) {
 			if (i+1 == stbl->SampleSize->sampleCount-1) {
 				//and by default, our last sample has the same delta as the prev
-	//			stts->entries[j].sampleCount++;
+				stts->entries[j].sampleCount++;
+				sampNum ++;
 			} else if (DTSs[i+1] - DTSs[i] == stts->entries[j].sampleDelta) {
 				stts->entries[j].sampleCount += 1;
+				sampNum ++;
 			} else {
-				j++;
 				stts->nb_entries++;
+				if (j+1==stts->alloc_size) {
+					stts->alloc_size++;
+					stts->entries = gf_realloc(stts->entries, sizeof(GF_SttsEntry) * stts->alloc_size);
+				}
+				j++;
 				stts->entries[j].sampleCount = 1;
 				stts->entries[j].sampleDelta = (u32) (DTSs[i+1] - DTSs[i]);
+				sampNum ++;
 			}
 		}
 		stts->w_LastDTS = DTSs[stbl->SampleSize->sampleCount - 2];
 		gf_free(DTSs);
+		assert(sampNum == stbl->SampleSize->sampleCount - 1);
 
 	}
+
 	//reset write the cache to the end
 	stts->w_currentSampleNum = stbl->SampleSize->sampleCount - 1;
-	//reset read the cache to the begining
+	//reset read the cache to the beginning
 	stts->r_FirstSampleInEntry = stts->r_currentEntryIndex = 0;
 	stts->r_CurrentDTS = 0;
 	return GF_OK;
@@ -928,7 +1103,7 @@ GF_Err stbl_RemoveSize(GF_SampleSizeBox *stsz, u32 sampleNumber)
 		return GF_OK;
 	}
 	if (sampleNumber < stsz->sampleCount) {
-		memcpy(stsz->sizes + sampleNumber - 1, stsz->sizes + sampleNumber, sizeof(u32) * (stsz->sampleCount - sampleNumber));
+		memmove(stsz->sizes + sampleNumber - 1, stsz->sizes + sampleNumber, sizeof(u32) * (stsz->sampleCount - sampleNumber));
 	}
 	stsz->sampleCount--;
 	return GF_OK;
@@ -942,6 +1117,30 @@ GF_Err stbl_RemoveChunk(GF_SampleTableBox *stbl, u32 sampleNumber)
 	u64 *Loffsets;
 	GF_SampleToChunkBox *stsc = stbl->SampleToChunk;
 
+	//raw audio or constant sample size and dur
+	if (stsc->nb_entries < stbl->SampleSize->sampleCount) {
+		if (sampleNumber==stbl->SampleSize->sampleCount+1) {
+			GF_StscEntry *ent = &stsc->entries[stsc->nb_entries-1];
+			if (ent->samplesPerChunk)
+				ent->samplesPerChunk--;
+			if (!ent->samplesPerChunk) {
+				stsc->nb_entries--;
+
+				if (stbl->ChunkOffset->type == GF_ISOM_BOX_TYPE_STCO) {
+					((GF_ChunkOffsetBox *)stbl->ChunkOffset)->nb_entries --;
+				} else {
+					((GF_ChunkLargeOffsetBox *)stbl->ChunkOffset)->nb_entries --;
+				}
+				if (stsc->nb_entries) {
+					ent = &stsc->entries[stsc->nb_entries-1];
+					ent->nextChunk --;
+				}
+			}
+			return GF_OK;
+		}
+		GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("[iso file] removing sample in middle of track not supported for constant size and duration samples\n"));
+		return GF_NOT_SUPPORTED;
+	}
 	//remove the entry in SampleToChunk (1 <-> 1 in edit mode)
 	memmove(&stsc->entries[sampleNumber-1], &stsc->entries[sampleNumber], sizeof(GF_StscEntry)*(stsc->nb_entries-sampleNumber));
 	stsc->nb_entries--;
@@ -1023,20 +1222,19 @@ GF_Err stbl_RemoveRAP(GF_SampleTableBox *stbl, u32 sampleNumber)
 		stss->alloc_size = stss->nb_entries = 0;
 		return GF_OK;
 	}
-	//the real pain is that we may actually not have to change anything..
-	for (i=0; i<stss->nb_entries; i++) {
-		if (sampleNumber == stss->sampleNumbers[i]) goto found;
-	}
-	//nothing to do
-	return GF_OK;
 
-found:
-	//a small opt: the sample numbers are in order...
-	i++;
-	for (;i<stss->nb_entries; i++) {
-		stss->sampleNumbers[i-1] = stss->sampleNumbers[i];
+	for (i=0; i<stss->nb_entries; i++) {
+		//found the sample
+		if (sampleNumber == stss->sampleNumbers[i]) {
+			memmove(&stss->sampleNumbers[i], &stss->sampleNumbers[i+1], sizeof(u32)* (stss->nb_entries-i-1) );
+			stss->nb_entries--;
+		}
+
+		if (sampleNumber < stss->sampleNumbers[i]) {
+			assert(stss->sampleNumbers[i]);
+			stss->sampleNumbers[i]--;
+		}
 	}
-	stss->nb_entries -= 1;
 	return GF_OK;
 }
 
@@ -1133,99 +1331,75 @@ GF_Err stbl_RemovePaddingBits(GF_SampleTableBox *stbl, u32 SampleNumber)
 			k++;
 		}
 	}
-	
+
 	stbl->PaddingBits->SampleCount -= 1;
 	gf_free(stbl->PaddingBits->padbits);
 	stbl->PaddingBits->padbits = p;
 	return GF_OK;
 }
 
-
-GF_Err stbl_AddSampleFragment(GF_SampleTableBox *stbl, u32 sampleNumber, u16 size)
+GF_Err stbl_RemoveSubSample(GF_SampleTableBox *stbl, u32 SampleNumber)
 {
-	GF_Err e;
-	u32 i, count;
-	GF_StsfEntry *ent;
-	GF_SampleFragmentBox *stsf;		
-	stsf = stbl->Fragments;
+	u32 i, count, j, subs_count, prev_sample, delta=0;
 
-	if (!stsf) {
-		//create table if any
-		stsf = (GF_SampleFragmentBox *) gf_isom_box_new(GF_ISOM_BOX_TYPE_STSF);
-		if (!stsf) return GF_OUT_OF_MEM;
-		e = stbl_AddBox(stbl, (GF_Box *) stsf);
-		if (e) return e;
-	}
+	if (! stbl->sub_samples) return GF_OK;
+	subs_count = gf_list_count(stbl->sub_samples);
+	for (j=0; j<subs_count; j++) {
+		GF_SubSampleInformationBox *subs = gf_list_get(stbl->sub_samples, j);
+		if (! subs->Samples) continue;
 
-	//check cache
-	if (!stsf->w_currentEntry || (stsf->w_currentEntry->SampleNumber < sampleNumber)) {
-		stsf->w_currentEntry = NULL;
-		stsf->w_currentEntryIndex = 0;
-	}
-	i = stsf->w_currentEntryIndex;
-
-	count = gf_list_count(stsf->entryList);
-	for (; i<count; i++) {
-		ent = (GF_StsfEntry *)gf_list_get(stsf->entryList, i);
-		if (ent->SampleNumber > sampleNumber) {
-			ent = (GF_StsfEntry *)gf_malloc(sizeof(GF_StsfEntry));
-			if (!ent) return GF_OUT_OF_MEM;
-			memset(ent, 0, sizeof(GF_StsfEntry));
-			ent->SampleNumber = sampleNumber;
-			gf_list_insert(stsf->entryList, ent, i);
-			stsf->w_currentEntry = ent;
-			stsf->w_currentEntryIndex = i;
-			goto ent_found;
-		}
-		else if (ent->SampleNumber == sampleNumber) {
-			stsf->w_currentEntry = ent;
-			stsf->w_currentEntryIndex = i;
-			goto ent_found;
+		prev_sample = 0;
+		count = gf_list_count(subs->Samples);
+		for (i=0; i<count; i++) {
+			GF_SubSampleInfoEntry *e = gf_list_get(subs->Samples, i);
+			prev_sample += e->sample_delta;
+			if (prev_sample==SampleNumber) {
+				gf_list_rem(subs->Samples, i);
+				while (gf_list_count(e->SubSamples)) {
+					GF_SubSampleEntry *pSubSamp = (GF_SubSampleEntry*) gf_list_get(e->SubSamples, 0);
+					gf_free(pSubSamp);
+					gf_list_rem(e->SubSamples, 0);
+				}
+				gf_list_del(e->SubSamples);
+				gf_free(e);
+				i--;
+				count--;
+				delta=1;
+				continue;
+			}
+			e->sample_delta+=delta;
 		}
 	}
-	//if we get here add a new entry
-	GF_SAFEALLOC(ent, GF_StsfEntry);
-	ent->SampleNumber = sampleNumber;
-	gf_list_add(stsf->entryList, ent);
-	stsf->w_currentEntry = ent;
-	stsf->w_currentEntryIndex = gf_list_count(stsf->entryList)-1;
-
-ent_found:
-	if (!ent->fragmentCount) {
-		ent->fragmentCount = 1;
-		ent->fragmentSizes = (u16*)gf_malloc(sizeof(u16));
-		if (!ent->fragmentSizes) return GF_OUT_OF_MEM;
-		ent->fragmentSizes[0] = size;
-		return GF_OK;
-	}
-	ent->fragmentSizes = (u16*)gf_realloc(ent->fragmentSizes, sizeof(u16) * (ent->fragmentCount+1));
-	if (!ent->fragmentSizes) return GF_OUT_OF_MEM;
-	ent->fragmentSizes[ent->fragmentCount] = size;
-	ent->fragmentCount += 1;
-
 	return GF_OK;
 }
 
-GF_Err stbl_RemoveSampleFragments(GF_SampleTableBox *stbl, u32 sampleNumber)
-{
-	u32 i;
-	GF_StsfEntry *ent;
-	GF_SampleFragmentBox *stsf = stbl->Fragments;
 
-	i=0;
-	while ((ent = (GF_StsfEntry *)gf_list_enum(stsf->entryList, &i))) {
-		if (ent->SampleNumber == sampleNumber) {
-			gf_list_rem(stsf->entryList, i-1);
-			if (ent->fragmentSizes) gf_free(ent->fragmentSizes);
-			gf_free(ent);
-			goto exit;
+GF_Err stbl_RemoveSampleGroup(GF_SampleTableBox *stbl, u32 SampleNumber)
+{
+	u32 i, k, count, prev_sample;
+
+	if (!stbl->sampleGroups) return GF_OK;
+
+	count = gf_list_count(stbl->sampleGroups);
+	prev_sample = 0;
+	for (i=0; i<count; i++) {
+		GF_SampleGroupBox *e = gf_list_get(stbl->sampleGroups, i);
+		for (k=0; k<e->entry_count; k++) {
+			if ((SampleNumber>prev_sample) && (SampleNumber <= prev_sample + e->sample_entries[k].sample_count) ) {
+				e->sample_entries[k].sample_count--;
+				if (!e->sample_entries[k].sample_count) {
+					memmove(&e->sample_entries[k], &e->sample_entries[k+1], sizeof(GF_SampleGroupEntry) * (e->entry_count-k-1));
+					e->entry_count--;
+				}
+				break;
+			}
 		}
-	}
-exit:
-	//empty table, remove it
-	if (!gf_list_count(stsf->entryList)) {
-		stbl->Fragments = NULL;
-		gf_isom_box_del((GF_Box *)stsf);
+		if (!e->entry_count) {
+			gf_list_rem(stbl->sampleGroups, i);
+			i--;
+			count--;
+			gf_isom_box_del((GF_Box *) e);
+		}
 	}
 	return GF_OK;
 }
@@ -1233,8 +1407,9 @@ exit:
 GF_Err stbl_SampleSizeAppend(GF_SampleSizeBox *stsz, u32 data_size)
 {
 	u32 i;
+	u32 single_size = 0;
 	if (!stsz || !stsz->sampleCount) return GF_BAD_PARAM;
-	
+
 	//we must realloc our table
 	if (stsz->sampleSize) {
 		stsz->sizes = (u32*)gf_malloc(sizeof(u32)*stsz->sampleCount);
@@ -1242,7 +1417,24 @@ GF_Err stbl_SampleSizeAppend(GF_SampleSizeBox *stsz, u32 data_size)
 		for (i=0; i<stsz->sampleCount; i++) stsz->sizes[i] = stsz->sampleSize;
 		stsz->sampleSize = 0;
 	}
-	stsz->sizes[stsz->sampleCount-1] += data_size;
+	if (!stsz->sizes) {
+		stsz->sampleSize = data_size;
+	} else {
+		stsz->sizes[stsz->sampleCount-1] += data_size;
+
+		single_size = stsz->sizes[0];
+		for (i=1; i<stsz->sampleCount; i++) {
+			if (stsz->sizes[i] != single_size) {
+				single_size = 0;
+				break;
+			}
+		}
+		if (single_size) {
+			stsz->sampleSize = single_size;
+			gf_free(stsz->sizes);
+			stsz->sizes = NULL;
+		}
+	}
 	return GF_OK;
 }
 
@@ -1250,13 +1442,14 @@ GF_Err stbl_SampleSizeAppend(GF_SampleSizeBox *stsz, u32 data_size)
 
 
 
-void stbl_AppendTime(GF_SampleTableBox *stbl, u32 duration)
+void stbl_AppendTime(GF_SampleTableBox *stbl, u32 duration, u32 nb_pack)
 {
 	GF_TimeToSampleBox *stts = stbl->TimeToSample;
 
+	if (!nb_pack) nb_pack = 1;
 	if (stts->nb_entries) {
 		if (stts->entries[stts->nb_entries-1].sampleDelta == duration) {
-			stts->entries[stts->nb_entries-1].sampleCount += 1;
+			stts->entries[stts->nb_entries-1].sampleCount += nb_pack;
 			return;
 		}
 	}
@@ -1266,28 +1459,29 @@ void stbl_AppendTime(GF_SampleTableBox *stbl, u32 duration)
 		if (!stts->entries) return;
 		memset(&stts->entries[stts->nb_entries], 0, sizeof(GF_SttsEntry)*(stts->alloc_size-stts->nb_entries) );
 	}
-	stts->entries[stts->nb_entries].sampleCount = 1;
+	stts->entries[stts->nb_entries].sampleCount = nb_pack;
 	stts->entries[stts->nb_entries].sampleDelta = duration;
 	stts->nb_entries++;
 }
 
-void stbl_AppendSize(GF_SampleTableBox *stbl, u32 size)
+void stbl_AppendSize(GF_SampleTableBox *stbl, u32 size, u32 nb_pack)
 {
 	u32 i;
+	if (!nb_pack) nb_pack = 1;
 
 	if (!stbl->SampleSize->sampleCount) {
 		stbl->SampleSize->sampleSize = size;
-		stbl->SampleSize->sampleCount = 1;
+		stbl->SampleSize->sampleCount += nb_pack;
 		return;
 	}
 	if (stbl->SampleSize->sampleSize && (stbl->SampleSize->sampleSize==size)) {
-		stbl->SampleSize->sampleCount += 1;
+		stbl->SampleSize->sampleCount += nb_pack;
 		return;
 	}
 	if (!stbl->SampleSize->sizes || (stbl->SampleSize->sampleCount==stbl->SampleSize->alloc_size)) {
 		Bool init_table = (stbl->SampleSize->sizes==NULL) ? 1 : 0;
 		ALLOC_INC(stbl->SampleSize->alloc_size);
-		if (stbl->SampleSize->sampleCount>stbl->SampleSize->alloc_size)
+		if (stbl->SampleSize->sampleCount >= stbl->SampleSize->alloc_size)
 			stbl->SampleSize->alloc_size = stbl->SampleSize->sampleCount+1;
 
 		stbl->SampleSize->sizes = (u32 *)gf_realloc(stbl->SampleSize->sizes, sizeof(u32)*stbl->SampleSize->alloc_size);
@@ -1295,14 +1489,16 @@ void stbl_AppendSize(GF_SampleTableBox *stbl, u32 size)
 		memset(&stbl->SampleSize->sizes[stbl->SampleSize->sampleCount], 0, sizeof(u32) * (stbl->SampleSize->alloc_size - stbl->SampleSize->sampleCount) );
 
 		if (init_table) {
-			for (i=0; i<stbl->SampleSize->sampleCount;i++) 
+			for (i=0; i<stbl->SampleSize->sampleCount; i++)
 				stbl->SampleSize->sizes[i] = stbl->SampleSize->sampleSize;
 		}
 	}
 	stbl->SampleSize->sampleSize = 0;
 	stbl->SampleSize->sizes[stbl->SampleSize->sampleCount] = size;
-	stbl->SampleSize->sampleCount += 1;
+	stbl->SampleSize->sampleCount += nb_pack;
 }
+
+
 
 void stbl_AppendChunk(GF_SampleTableBox *stbl, u64 offset)
 {
@@ -1340,7 +1536,7 @@ void stbl_AppendChunk(GF_SampleTableBox *stbl, u64 offset)
 	//large offsets
 	else {
 		co64 = (GF_ChunkLargeOffsetBox *)stbl->ChunkOffset;
-		off_64 = (u64*)gf_malloc(sizeof(u32)*(co64->nb_entries+1));
+		off_64 = (u64*)gf_malloc(sizeof(u64)*(co64->nb_entries+1));
 		if (!off_64) return;
 		for (i=0; i<co64->nb_entries; i++) off_64[i] = co64->offsets[i];
 		off_64[i] = offset;
@@ -1362,7 +1558,7 @@ void stbl_AppendSampleToChunk(GF_SampleTableBox *stbl, u32 DescIndex, u32 sample
 	if (stsc->nb_entries) {
 		ent = &stsc->entries[stsc->nb_entries-1];
 		//good we can use this one
-		if ( (ent->sampleDescriptionIndex == DescIndex) && (ent->samplesPerChunk==samplesInChunk)) 
+		if ( (ent->sampleDescriptionIndex == DescIndex) && (ent->samplesPerChunk==samplesInChunk))
 			return;
 
 		//set the next chunk btw ...
@@ -1398,7 +1594,7 @@ void stbl_AppendRAP(GF_SampleTableBox *stbl, u8 isRap)
 		if (stbl->SampleSize->sampleCount > 1) {
 			stbl->SyncSample->sampleNumbers = (u32*)gf_malloc(sizeof(u32) * (stbl->SampleSize->sampleCount-1));
 			if (!stbl->SyncSample->sampleNumbers) return;
-			for (i=0; i<stbl->SampleSize->sampleCount-1; i++) 
+			for (i=0; i<stbl->SampleSize->sampleCount-1; i++)
 				stbl->SyncSample->sampleNumbers[i] = i+1;
 
 		}
@@ -1418,6 +1614,27 @@ void stbl_AppendRAP(GF_SampleTableBox *stbl, u8 isRap)
 	stbl->SyncSample->nb_entries += 1;
 }
 
+void stbl_AppendTrafMap(GF_SampleTableBox *stbl)
+{
+	GF_TrafToSampleMap *tmap;
+
+	if (!stbl->traf_map) {
+		//nope, create one
+		GF_SAFEALLOC(stbl->traf_map, GF_TrafToSampleMap);
+		if (!stbl->traf_map) return;
+	}
+	tmap = stbl->traf_map;
+	if (tmap->nb_entries >= stbl->SampleSize->sampleCount)
+		tmap->nb_entries = 0;
+
+	if (tmap->nb_entries + 1 > tmap->nb_alloc) {
+		tmap->nb_alloc++;
+		tmap->sample_num = gf_realloc(tmap->sample_num, sizeof(u32) * tmap->nb_alloc);
+	}
+	tmap->sample_num[tmap->nb_entries] = stbl->SampleSize->sampleCount;
+	tmap->nb_entries += 1;
+}
+
 void stbl_AppendPadding(GF_SampleTableBox *stbl, u8 padding)
 {
 	u32 i;
@@ -1426,8 +1643,7 @@ void stbl_AppendPadding(GF_SampleTableBox *stbl, u8 padding)
 
 	pad_bits = (u8*)gf_malloc(sizeof(u8) * stbl->SampleSize->sampleCount);
 	if (!pad_bits) return;
-	memset(pad_bits, 0, sizeof(pad_bits));
-//	for (i=0; i<stbl->SampleSize->sampleCount; i++) pad_bits[i] = 0;
+	memset(pad_bits, 0, sizeof(u8) * stbl->SampleSize->sampleCount);
 	for (i=0; i<stbl->PaddingBits->SampleCount; i++) pad_bits[i] = stbl->PaddingBits->padbits[i];
 	pad_bits[stbl->SampleSize->sampleCount-1] = padding;
 	if (stbl->PaddingBits->padbits) gf_free(stbl->PaddingBits->padbits);
@@ -1435,15 +1651,15 @@ void stbl_AppendPadding(GF_SampleTableBox *stbl, u8 padding)
 	stbl->PaddingBits->SampleCount = stbl->SampleSize->sampleCount;
 }
 
-void stbl_AppendCTSOffset(GF_SampleTableBox *stbl, u32 CTSOffset)
+void stbl_AppendCTSOffset(GF_SampleTableBox *stbl, s32 offset)
 {
 	GF_CompositionOffsetBox *ctts;
 
 	if (!stbl->CompositionOffset) stbl->CompositionOffset = (GF_CompositionOffsetBox *) gf_isom_box_new(GF_ISOM_BOX_TYPE_CTTS);
-	
+
 	ctts = stbl->CompositionOffset;
 
-	if (ctts->nb_entries && (ctts->entries[ctts->nb_entries-1].decodingOffset == CTSOffset) ){
+	if (ctts->nb_entries && (ctts->entries[ctts->nb_entries-1].decodingOffset == offset) ) {
 		ctts->entries[ctts->nb_entries-1].sampleCount++;
 		return;
 	}
@@ -1452,9 +1668,10 @@ void stbl_AppendCTSOffset(GF_SampleTableBox *stbl, u32 CTSOffset)
 		ctts->entries = gf_realloc(ctts->entries, sizeof(GF_DttsEntry)*ctts->alloc_size);
 		memset(&ctts->entries[ctts->nb_entries], 0, sizeof(GF_DttsEntry)*(ctts->alloc_size-ctts->nb_entries) );
 	}
-	ctts->entries[ctts->nb_entries].decodingOffset = CTSOffset;
+	ctts->entries[ctts->nb_entries].decodingOffset = offset;
 	ctts->entries[ctts->nb_entries].sampleCount = 1;
 	ctts->nb_entries++;
+	if (offset<0) ctts->version=1;
 }
 
 void stbl_AppendDegradation(GF_SampleTableBox *stbl, u16 DegradationPriority)
@@ -1482,7 +1699,6 @@ void stbl_AppendDepType(GF_SampleTableBox *stbl, u32 DepType)
 GF_Err stbl_UnpackOffsets(GF_SampleTableBox *stbl)
 {
 	GF_Err e;
-	u8 isEdited;
 	u32 i, chunkNumber, sampleDescIndex;
 	u64 dataOffset;
 	GF_StscEntry *ent;
@@ -1538,12 +1754,15 @@ GF_Err stbl_UnpackOffsets(GF_SampleTableBox *stbl)
 	stsc_tmp->nb_entries = stsc_tmp->alloc_size = stbl->SampleSize->sampleCount;
 	stsc_tmp->entries = gf_malloc(sizeof(GF_StscEntry)*stsc_tmp->nb_entries);
 	if (!stsc_tmp->entries) return GF_OUT_OF_MEM;
+	//set write cache to last sample before unpack
+	stsc_tmp->w_lastSampleNumber = stbl->SampleSize->sampleCount;
+	stsc_tmp->w_lastChunkNumber = stbl->SampleSize->sampleCount;
 
 	//OK write our two tables...
 	ent = NULL;
 	for (i = 0; i < stbl->SampleSize->sampleCount; i++) {
 		//get the data info for the sample
-		e = stbl_GetSampleInfos(stbl, i+1, &dataOffset, &chunkNumber, &sampleDescIndex, &isEdited);
+		e = stbl_GetSampleInfos(stbl, i+1, &dataOffset, &chunkNumber, &sampleDescIndex, NULL);
 		if (e) goto err_exit;
 		ent = &stsc_tmp->entries[i];
 		ent->isEdited = 0;
@@ -1560,7 +1779,7 @@ GF_Err stbl_UnpackOffsets(GF_SampleTableBox *stbl)
 	}
 	//close the list
 	if (ent) ent->nextChunk = 0;
-	
+
 
 	//done, remove our previous tables
 	gf_isom_box_del(stbl->ChunkOffset);
@@ -1641,9 +1860,9 @@ static GFINLINE GF_Err stbl_AddOffset(GF_Box **a, u64 offset)
 
 //This function packs the offset after easy editing, eg samples
 //are re-arranged in chunks according to the chunkOffsets
-//NOTE: this has to be called once interleaving or whatever is done and 
+//NOTE: this has to be called once interleaving or whatever is done and
 //the final MDAT is written!!!
-GF_Err stbl_SetChunkAndOffset(GF_SampleTableBox *stbl, u32 sampleNumber, u32 StreamDescIndex, GF_SampleToChunkBox *the_stsc, GF_Box **the_stco, u64 data_offset, u8 forceNewChunk)
+GF_Err stbl_SetChunkAndOffset(GF_SampleTableBox *stbl, u32 sampleNumber, u32 StreamDescIndex, GF_SampleToChunkBox *the_stsc, GF_Box **the_stco, u64 data_offset, Bool forceNewChunk, u32 nb_samp)
 {
 	GF_Err e;
 	u8 newChunk;
@@ -1666,16 +1885,16 @@ GF_Err stbl_SetChunkAndOffset(GF_SampleTableBox *stbl, u32 sampleNumber, u32 Str
 		newChunk = 1;
 	} else {
 		cur_ent = &the_stsc->entries[the_stsc->nb_entries - 1];
-	//3 - make sure we do not exceed the MaxSamplesPerChunk and we have the same descIndex
-		if (StreamDescIndex != cur_ent->sampleDescriptionIndex) 
+		//3 - make sure we do not exceed the MaxSamplesPerChunk and we have the same descIndex
+		if (StreamDescIndex != cur_ent->sampleDescriptionIndex)
 			newChunk = 1;
-		if (stbl->MaxSamplePerChunk && cur_ent->samplesPerChunk == stbl->MaxSamplePerChunk) 
+		if (stbl->MaxSamplePerChunk && cur_ent->samplesPerChunk == stbl->MaxSamplePerChunk)
 			newChunk = 1;
 	}
 
 	//no need for a new chunk
 	if (!newChunk) {
-		cur_ent->samplesPerChunk += 1;
+		cur_ent->samplesPerChunk += nb_samp;
 		return GF_OK;
 	}
 
@@ -1683,9 +1902,10 @@ GF_Err stbl_SetChunkAndOffset(GF_SampleTableBox *stbl, u32 sampleNumber, u32 Str
 	//check if we can remove the current sampleToChunk entry (same properties)
 	if (the_stsc->nb_entries > 1) {
 		ent = &the_stsc->entries[the_stsc->nb_entries - 2];
+		if (!ent) return GF_OUT_OF_MEM;
 		if ( (ent->sampleDescriptionIndex == cur_ent->sampleDescriptionIndex)
-			&& (ent->samplesPerChunk == cur_ent->samplesPerChunk)
-			) {
+		        && (ent->samplesPerChunk == cur_ent->samplesPerChunk)
+		   ) {
 			//OK, it's the same SampleToChunk, so delete it
 			ent->nextChunk = cur_ent->firstChunk;
 			the_stsc->nb_entries--;
@@ -1704,6 +1924,7 @@ GF_Err stbl_SetChunkAndOffset(GF_SampleTableBox *stbl, u32 sampleNumber, u32 Str
 	}
 	//create a new entry (could be the first one, BTW)
 	newEnt = &the_stsc->entries[the_stsc->nb_entries];
+	if (!newEnt) return GF_OUT_OF_MEM;
 
 	//get the first chunk value
 	if ((*the_stco)->type == GF_ISOM_BOX_TYPE_STCO) {
@@ -1712,7 +1933,7 @@ GF_Err stbl_SetChunkAndOffset(GF_SampleTableBox *stbl, u32 sampleNumber, u32 Str
 		newEnt->firstChunk = ((GF_ChunkLargeOffsetBox *) (*the_stco) )->nb_entries;
 	}
 	newEnt->sampleDescriptionIndex = StreamDescIndex;
-	newEnt->samplesPerChunk = 1;
+	newEnt->samplesPerChunk = nb_samp;
 	newEnt->nextChunk = 0;
 	//if we already have an entry, adjust its next chunk to point to our new chunk
 	if (the_stsc->nb_entries)
@@ -1721,7 +1942,7 @@ GF_Err stbl_SetChunkAndOffset(GF_SampleTableBox *stbl, u32 sampleNumber, u32 Str
 	return GF_OK;
 }
 
-
+GF_EXPORT
 GF_Err gf_isom_refresh_size_info(GF_ISOFile *file, u32 trackNumber)
 {
 	u32 i, size;

@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,16 +11,16 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
- *		
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
  */
 
 #include "rtp_in.h"
@@ -32,24 +32,24 @@ void RP_SendFailure(RTSPSession *sess, GF_RTSPCommand *com, GF_Err e)
 {
 	char sMsg[1000];
 	sprintf(sMsg, "Cannot send %s", com->method);
-	gf_term_on_message(sess->owner->service, e, sMsg);
+	RP_SendMessage(sess->owner->service, e, sMsg);
 }
 
-Bool RP_ProcessResponse(RTSPSession *sess, GF_RTSPCommand *com, GF_Err e)
+GF_Err RP_ProcessResponse(RTSPSession *sess, GF_RTSPCommand *com, GF_Err e)
 {
-	if (!strcmp(com->method, GF_RTSP_DESCRIBE)) 
+	if (!strcmp(com->method, GF_RTSP_DESCRIBE))
 		return RP_ProcessDescribe(sess, com, e);
-	else if (!strcmp(com->method, GF_RTSP_SETUP)) 
+	else if (!strcmp(com->method, GF_RTSP_SETUP))
 		RP_ProcessSetup(sess, com, e);
-	else if (!strcmp(com->method, GF_RTSP_TEARDOWN)) 
+	else if (!strcmp(com->method, GF_RTSP_TEARDOWN))
 		RP_ProcessTeardown(sess, com, e);
-	else if (!strcmp(com->method, GF_RTSP_PLAY) || !strcmp(com->method, GF_RTSP_PAUSE)) 
+	else if (!strcmp(com->method, GF_RTSP_PLAY) || !strcmp(com->method, GF_RTSP_PAUSE))
 		RP_ProcessUserCommand(sess, com, e);
 	return GF_OK;
 }
 
 /*access to command list is protected bymutex, BUT ONLY ACCESS - this way we're sure that command queueing
-from app will not deadlock if we're waiting for the app to release any mutex (don't forget play request may 
+from app will not deadlock if we're waiting for the app to release any mutex (don't forget play request may
 come on stream N while we're processing stream P setup)*/
 static GF_RTSPCommand *RP_GetCommand(RTSPSession *sess)
 {
@@ -93,7 +93,7 @@ void RP_ProcessCommands(RTSPSession *sess)
 			if (e!=GF_OK) {
 				RP_RemoveCommand(sess);
 				gf_rtsp_command_del(com);
-				gf_term_on_connect(sess->owner->service, NULL, e);
+				gf_service_connect_ack(sess->owner->service, NULL, e);
 				return;
 			}
 
@@ -102,15 +102,23 @@ void RP_ProcessCommands(RTSPSession *sess)
 			sess->flags &= ~RTSP_WAIT_REPLY;
 			sess->command_time = 0;
 		} else {
+			u32 time_out = sess->owner->time_out;
 			/*evaluate timeout*/
 			time = gf_sys_clock() - sess->command_time;
+
+			if (!strcmp(com->method, GF_RTSP_DESCRIBE) && (time_out < 10000) ) time_out = 10000;
 			/*don't waste time waiting for teardown ACK, half a sec is enough. If server is not replying
-			in time it is likely to never reply (happens with RTP over RTSP) -> kill session 
+			in time it is likely to never reply (happens with RTP over RTSP) -> kill session
 			and create new one*/
-			if (!strcmp(com->method, GF_RTSP_TEARDOWN) && (time>=500) ) time = sess->owner->time_out;
+			else if (!strcmp(com->method, GF_RTSP_TEARDOWN) && (time>=500) ) time = time_out;
+
 			//signal what's going on
-			if (time >= sess->owner->time_out) {
-				if (!strcmp(com->method, GF_RTSP_TEARDOWN)) gf_rtsp_session_reset(sess->session, 1);
+			if (time >= time_out) {
+				if (!strcmp(com->method, GF_RTSP_TEARDOWN)) {
+					gf_rtsp_session_reset(sess->session, GF_TRUE);
+				} else {
+					GF_LOG(GF_LOG_WARNING, GF_LOG_RTP, ("[RTP] Request Timeout for command %s after %d ms\n", com->method, time));
+				}
 
 				RP_ProcessResponse(sess, com, GF_IP_NETWORK_FAILURE);
 				RP_RemoveCommand(sess);
@@ -139,14 +147,13 @@ void RP_ProcessCommands(RTSPSession *sess)
 		return;
 	}
 	/*process*/
-	com->User_Agent = (char*)gf_modules_get_option((GF_BaseInterface *) gf_term_get_service_interface(sess->owner->service), "Downloader", "UserAgent");
+	com->User_Agent = (char*)gf_modules_get_option((GF_BaseInterface *) gf_service_get_interface(sess->owner->service), "Downloader", "UserAgent");
 	if (!com->User_Agent) com->User_Agent = "GPAC " GPAC_VERSION " RTSP Client";
 	com->Accept_Language = RTSP_LANGUAGE;
 	/*if no session assigned and a session ID is valid, use it*/
 	if (sess->session_id && !com->Session)
 		com->Session = sess->session_id;
 
-	e = GF_OK;
 	/*preprocess describe before sending (always the ESD url thing)*/
 	if (!strcmp(com->method, GF_RTSP_DESCRIBE)) {
 		com->Session = NULL;
@@ -156,9 +163,9 @@ void RP_ProcessCommands(RTSPSession *sess)
 		}
 	}
 	/*preprocess play/stop/pause before sending (aggregation)*/
-	if (!strcmp(com->method, GF_RTSP_PLAY) 
-		|| !strcmp(com->method, GF_RTSP_PAUSE)
-		|| !strcmp(com->method, GF_RTSP_TEARDOWN)) {
+	if (!strcmp(com->method, GF_RTSP_PLAY)
+	        || !strcmp(com->method, GF_RTSP_PAUSE)
+	        || !strcmp(com->method, GF_RTSP_TEARDOWN)) {
 		//command is skipped
 		if (!RP_PreprocessUserCom(sess, com)) {
 			e = GF_BAD_PARAM;
@@ -217,7 +224,7 @@ RTSPSession *RP_CheckSession(RTPClient *rtp, char *control)
 	RTSPSession *sess;
 	if (!control) return NULL;
 
-	if (!strcmp(control, "*")) control = (char *) gf_term_get_service_url(rtp->service);
+	if (!strcmp(control, "*")) control = (char *) gf_service_get_url(rtp->service);
 
 	i=0;
 	while ( (sess = (RTSPSession *)gf_list_enum(rtp->sessions, &i)) ) {
@@ -250,13 +257,13 @@ RTSPSession *RP_NewSession(RTPClient *rtp, char *session_control)
 	if (!rtsp) return NULL;
 
 	GF_SAFEALLOC(tmp, RTSPSession);
+	if (!tmp) return NULL;
 	tmp->owner = rtp;
 	tmp->session = rtsp;
 
-
-	szCtrl = (char *)gf_modules_get_option((GF_BaseInterface *) gf_term_get_service_interface(rtp->service), "Network", "MobileIPEnabled");
+	szCtrl = (char *)gf_modules_get_option((GF_BaseInterface *) gf_service_get_interface(rtp->service), "Network", "MobileIPEnabled");
 	if (szCtrl && !strcmp(szCtrl, "yes")) {
-		char *ip = (char *)gf_modules_get_option((GF_BaseInterface *) gf_term_get_service_interface(rtp->service), "Network", "MobileIP");
+		char *ip = (char *)gf_modules_get_option((GF_BaseInterface *) gf_service_get_interface(rtp->service), "Network", "MobileIP");
 		gf_rtsp_set_mobile_ip(rtsp, ip);
 	}
 
@@ -266,7 +273,7 @@ RTSPSession *RP_NewSession(RTPClient *rtp, char *session_control)
 		gf_rtsp_set_buffer_size(rtsp, RTSP_BUFFER_SIZE);
 	}
 	tmp->rtsp_commands = gf_list_new();
-	tmp->rtsp_rsp = gf_rtsp_response_new();	
+	tmp->rtsp_rsp = gf_rtsp_response_new();
 
 	gf_list_add(rtp->sessions, tmp);
 
@@ -279,10 +286,10 @@ GF_Err RP_AddStream(RTPClient *rtp, RTPStream *stream, char *session_control)
 	char *service_name, *ctrl;
 	RTSPSession *in_session = RP_CheckSession(rtp, session_control);
 
-	has_aggregated_control = 0;
+	has_aggregated_control = GF_FALSE;
 	if (session_control) {
 		//if (!strcmp(session_control, "*")) session_control = NULL;
-		if (session_control) has_aggregated_control = 1;
+		if (session_control) has_aggregated_control = GF_TRUE;
 	}
 
 	/*regular setup in an established session (RTSP DESCRIBE)*/
@@ -296,7 +303,7 @@ GF_Err RP_AddStream(RTPClient *rtp, RTPStream *stream, char *session_control)
 	/*setup through SDP with control - assume this is RTSP and try to create a session*/
 	if (stream->control) {
 		/*stream control is relative to main session*/
-		if (strnicmp(stream->control, "rtsp://", 7) && strnicmp(stream->control, "rtspu://", 7)) {
+		if (strnicmp(stream->control, "rtsp://", 7) && strnicmp(stream->control, "rtspu://", 8) && strnicmp(stream->control, "satip://", 8)) {
 			/*locate session by control - if no control was provided for the session, use default
 			session*/
 			if (!in_session) in_session = RP_CheckSession(rtp, session_control ? session_control : "*");
@@ -373,8 +380,8 @@ void RP_ResetSession(RTSPSession *sess, GF_Err e)
 		gf_rtsp_command_del(com);
 		//first = 0;
 	}
-	/*reset session state*/	
-	gf_rtsp_session_reset(sess->session, 1);
+	/*reset session state*/
+	gf_rtsp_session_reset(sess->session, GF_TRUE);
 	sess->flags &= ~RTSP_WAIT_REPLY;
 }
 
@@ -387,8 +394,19 @@ void RP_DelSession(RTSPSession *sess)
 	gf_rtsp_session_del(sess->session);
 	if (sess->control) gf_free(sess->control);
 	if (sess->session_id) gf_free(sess->session_id);
+	if (sess->satip_server) gf_free(sess->satip_server);
 	gf_free(sess);
 }
 
+void RP_SendMessage(GF_ClientService *service, GF_Err e, const char *message)
+{
+	GF_NetworkCommand com;
+	memset(&com, 0, sizeof(com));
+	com.command_type = GF_NET_SERVICE_EVENT;
+	com.send_event.evt.type = GF_EVENT_MESSAGE;
+	com.send_event.evt.message.message = message;
+	com.send_event.evt.message.error = e;
+	gf_service_command(service, &com, GF_OK);
+}
 
 #endif /*GPAC_DISABLE_STREAMING*/

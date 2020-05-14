@@ -14,14 +14,18 @@ CFLAGS+=-pg
 LDFLAGS+=-pg
 endif
 
-LINKFLAGS=$(SDL_LIBS)
+LINKFLAGS=-L../../bin/gcc -lgpac $(SDL_LIBS)
+
+ifeq ($(CONFIG_DARWIN), yes)
+LINKFLAGS+=-framework OpenGL
+endif
 
 #common obj
 OBJS=sdl_out.o audio.o video.o
 
 SRCS := $(OBJS:.o=.c) 
 
-LIB=gm_sdl_out.$(DYN_LIB_SUFFIX)
+LIB=gm_sdl_out$(DYN_LIB_SUFFIX)
 ifeq ($(CONFIG_WIN32),yes)
 #LDFLAGS+=-export-symbols sdl_out.def 
 endif
@@ -31,7 +35,7 @@ all: $(LIB)
 
 
 $(LIB): $(OBJS)
-	$(CC) $(SHFLAGS) $(LDFLAGS) -o ../../bin/gcc/$@ $(OBJS) $(LINKFLAGS) -L../../bin/gcc -lgpac
+	$(CC) $(SHFLAGS) -o ../../bin/gcc/$@ $(OBJS) $(LINKFLAGS) $(LDFLAGS)
 
 clean: 
 	rm -f $(OBJS) ../../bin/gcc/$(LIB)
@@ -45,10 +49,4 @@ depend:
 distclean: clean
 	rm -f Makefile.bak .depend
 
-
-
-# include dependency files if they exist
-#
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+-include .depend

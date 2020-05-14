@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -28,7 +28,7 @@
 
 #if (defined(WIN32) || defined(_WIN32_WCE)) && !defined(__GNUC__)
 
-#if defined(_WIN32_WCE) 
+#if defined(_WIN32_WCE)
 #pragma comment(lib, "toolhelp")
 #pragma comment(lib, "winsock")
 #endif
@@ -36,15 +36,9 @@
 #define _TOSTR(_val) #_val
 #define TOSTR(_val) _TOSTR(_val)
 
-#pragma comment(lib, "avcodec-"TOSTR(LIBAVCODEC_VERSION_MAJOR) )
-#pragma comment(lib, "avformat-"TOSTR(LIBAVFORMAT_VERSION_MAJOR) )
-#pragma comment(lib, "avutil-"TOSTR(LIBAVUTIL_VERSION_MAJOR) )
-#pragma comment(lib, "swscale-"TOSTR(LIBSWSCALE_VERSION_MAJOR) )
-
 #endif
 
-
-GF_EXPORT
+GPAC_MODULE_EXPORT
 const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
@@ -52,22 +46,22 @@ const u32 *QueryInterfaces()
 #ifndef DISABLE_FFMPEG_DEMUX
 		GF_NET_CLIENT_INTERFACE,
 #endif
-	0
+		0
 	};
 	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
-	if (InterfaceType == GF_MEDIA_DECODER_INTERFACE) return FFDEC_Load();
+	if (InterfaceType == GF_MEDIA_DECODER_INTERFACE) return (GF_BaseInterface*)FFDEC_Load();
 #ifndef DISABLE_FFMPEG_DEMUX
-	if (InterfaceType == GF_NET_CLIENT_INTERFACE) return New_FFMPEG_Demux();
+	if (InterfaceType == GF_NET_CLIENT_INTERFACE) return (GF_BaseInterface*)New_FFMPEG_Demux();
 #endif
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -81,3 +75,6 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 #endif
 	}
 }
+
+
+GPAC_MODULE_STATIC_DECLARATION( ffmpeg )

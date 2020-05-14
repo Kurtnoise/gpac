@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -84,13 +84,17 @@ typedef HRESULT(WINAPI * DIRECTDRAWCREATEPROC) (GUID *, LPDIRECTDRAW *, IUnknown
 
 
 
-#ifdef GPAC_USE_OGL_ES
+#ifdef GPAC_USE_GLES1X
 #include "GLES/egl.h"
+#elif defined(GPAC_USE_GLES2)
+#include "EGL/egl.h"
 #endif
+
+#define EGL_CHECK_ERR	{s32 res = eglGetError(); if (res!=12288) GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("EGL Error %d file %s line %d\n", res, __FILE__, __LINE__)); }
 
 typedef struct
 {
-    LPDDRAWSURFACE pSurface;
+	LPDDRAWSURFACE pSurface;
 	u32 width, height, format, pitch;
 	Bool is_yuv;
 } DDSurface;
@@ -113,23 +117,23 @@ typedef struct
 	Bool switch_res;
 
 #ifdef USE_DX_3
-    LPDIRECTDRAW pDD;
-    LPDIRECTDRAWSURFACE pPrimary;
-    LPDIRECTDRAWSURFACE pBack;
+	LPDIRECTDRAW pDD;
+	LPDIRECTDRAWSURFACE pPrimary;
+	LPDIRECTDRAWSURFACE pBack;
 #else
-    LPDIRECTDRAW7 pDD;
-    LPDIRECTDRAWSURFACE7 pPrimary;
-    LPDIRECTDRAWSURFACE7 pBack;
+	LPDIRECTDRAW7 pDD;
+	LPDIRECTDRAWSURFACE7 pPrimary;
+	LPDIRECTDRAWSURFACE7 pBack;
 #endif
 	Bool ddraw_init;
 	Bool yuv_init;
 	Bool fullscreen;
 	Bool systems_memory;
 	Bool force_alpha;
+	Bool offscreen_yuv_to_rgb;
 
 	u32 width, height;
 	u32 fs_width, fs_height;
-	u32 fs_store_width, fs_store_height;
 	u32 store_width, store_height;
 	LONG backup_styles;
 	Bool alt_down, ctrl_down;
@@ -149,21 +153,21 @@ typedef struct
 
 	Bool owns_hwnd;
 	u32 off_w, off_h, prev_styles;
-	LONG last_mouse_pos;
+	LONG_PTR last_mouse_pos;
 	/*cursors*/
 	HCURSOR curs_normal, curs_hand, curs_collide;
 	u32 cursor_type;
-	Bool is_setup;
-
+	Bool is_setup, disable_vsync;
+	char *caption;
 	/*gl*/
 #ifndef GPAC_DISABLE_3D
 
-#ifdef GPAC_USE_OGL_ES
+#if defined(GPAC_USE_GLES1X) || defined(GPAC_USE_GLES2)
 	NativeDisplayType gl_HDC;
-    EGLDisplay egldpy;
-    EGLSurface surface;
-    EGLConfig eglconfig;
-    EGLContext eglctx;
+	EGLDisplay egldpy;
+	EGLSurface surface;
+	EGLConfig eglconfig;
+	EGLContext eglctx;
 #else
 	HDC gl_HDC, pb_HDC;
 	HGLRC gl_HRC, pb_HRC;
@@ -173,20 +177,23 @@ typedef struct
 	u32 output_3d_type;
 	HWND gl_hwnd, bound_hwnd;
 	Bool gl_double_buffer;
-
+	/*0: not init, 1: used, 2: not used*/
+	u32 mode_high_bpp;
+	u8 bpp;
 #endif
 
 	Bool has_focus;
-	DWORD orig_wnd_proc;
+	LONG_PTR orig_wnd_proc;
 
-	u32 last_mouse_move, timer, cursor_type_backup;
+	UINT_PTR timer;
+	u32 last_mouse_move, cursor_type_backup;
 	Bool windowless, hidden;
 
 	Bool dd_lost;
 	Bool force_video_mem_for_yuv;
 
 	HMODULE hDDrawLib;
-    DIRECTDRAWCREATEPROC DirectDrawCreate;
+	DIRECTDRAWCREATEPROC DirectDrawCreate;
 } DDContext;
 
 void DD_SetupWindow(GF_VideoOutput *dr, Bool hide);
@@ -220,12 +227,12 @@ GF_Err DD_SetupOpenGL(GF_VideoOutput *dr, u32 offscreen_width, u32 offscreen_hei
 
 
 void *NewAudioOutput();
-void DeleteAudioOutput(void *);
+void DeleteDxAudioOutput(void *);
 
 
 #define SAFE_DS_RELEASE(p) { if(p) { p->lpVtbl->Release(p); (p)=NULL; } }
 
-LRESULT APIENTRY DD_WindowProc(HWND hWnd, UINT msg, UINT wParam, LONG lParam);
+LRESULT APIENTRY DD_WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 
 #endif

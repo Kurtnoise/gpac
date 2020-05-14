@@ -1,7 +1,7 @@
 /*
 *			GPAC - Multimedia Framework C SDK
 *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
 *					All rights reserved
 *
@@ -11,15 +11,15 @@
 *  it under the terms of the GNU Lesser General Public License as published by
 *  the Free Software Foundation; either version 2, or (at your option)
 *  any later version.
-*   
+*
 *  GPAC is distributed in the hope that it will be useful,
 *  but WITHOUT ANY WARRANTY; without even the implied warranty of
 *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 *  GNU Lesser General Public License for more details.
-*   
+*
 *  You should have received a copy of the GNU Lesser General Public
 *  License along with this library; see the file COPYING.  If not, write to
-*  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+*  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
 *
 */
 
@@ -27,7 +27,19 @@
 
 #ifdef GPAC_HAS_JP2
 
+#if !defined(__GNUC__)
+# if defined(_WIN32_WCE) || defined (WIN32)
+#  if defined(_DEBUG)
+#   pragma comment(lib, "LibOpenJPEGd")
+#  else
+#   pragma comment(lib, "LibOpenJPEG")
+#  endif
+# endif
+#endif
+
+
 #include <openjpeg.h>
+#include <gpac/isomedia.h>
 
 typedef struct
 {
@@ -58,11 +70,20 @@ static GF_Err JP2_AttachStream(GF_BaseDecoder *ifcg, GF_ESD *esd)
 		gf_bs_del(bs);
 
 		switch (ctx->nb_comp) {
-		case 1: ctx->pixel_format = GF_PIXEL_GREYSCALE; break;
-		case 2: ctx->pixel_format = GF_PIXEL_ALPHAGREY; break;
-		case 3: ctx->pixel_format = GF_PIXEL_RGB_24; break;
-		case 4: ctx->pixel_format = GF_PIXEL_RGBA; break;
-		default: return GF_NOT_SUPPORTED;
+		case 1:
+			ctx->pixel_format = GF_PIXEL_GREYSCALE;
+			break;
+		case 2:
+			ctx->pixel_format = GF_PIXEL_ALPHAGREY;
+			break;
+		case 3:
+			ctx->pixel_format = GF_PIXEL_RGB_24;
+			break;
+		case 4:
+			ctx->pixel_format = GF_PIXEL_RGBA;
+			break;
+		default:
+			return GF_NOT_SUPPORTED;
 		}
 	} else {
 		bs = gf_bs_new(esd->decoderConfig->decoderSpecificInfo->data, esd->decoderConfig->decoderSpecificInfo->dataLength, GF_BITSTREAM_READ);
@@ -77,9 +98,9 @@ static GF_Err JP2_AttachStream(GF_BaseDecoder *ifcg, GF_ESD *esd)
 		gf_bs_write_u32(bs, 0x0D0A870A);
 		gf_bs_write_u32(bs, 20);
 		gf_bs_write_u32(bs, GF_4CC('f','t','y','p') );
-		gf_bs_write_u32(bs, GF_4CC('j','p','2',' ') );
+		gf_bs_write_u32(bs, GF_ISOM_BRAND_JP2 );
 		gf_bs_write_u32(bs, 0);
-		gf_bs_write_u32(bs, GF_4CC('j','p','2',' ') );
+		gf_bs_write_u32(bs, GF_ISOM_BRAND_JP2 );
 
 		gf_bs_write_data(bs, esd->decoderConfig->decoderSpecificInfo->data+8, esd->decoderConfig->decoderSpecificInfo->dataLength-8);
 		gf_bs_get_content(bs, &ctx->dsi, &ctx->dsi_size);
@@ -87,7 +108,7 @@ static GF_Err JP2_AttachStream(GF_BaseDecoder *ifcg, GF_ESD *esd)
 
 		ctx->nb_comp = 3;
 		ctx->out_size = 3*ctx->width*ctx->height/2;
-		ctx->pixel_format = GF_PIXEL_YV12; 
+		ctx->pixel_format = GF_PIXEL_YV12;
 	}
 
 	return GF_OK;
@@ -154,21 +175,21 @@ static GF_Err JP2_SetCapabilities(GF_BaseDecoder *ifcg, GF_CodecCapability capab
 /**
 sample error callback expecting a FILE* client object
 */
-void error_callback(const char *msg, void *client_data) 
+void error_callback(const char *msg, void *client_data)
 {
 	GF_LOG(GF_LOG_ERROR, GF_LOG_CODEC, ("[OpenJPEG] Error %s", msg));
 }
 /**
 sample warning callback expecting a FILE* client object
 */
-void warning_callback(const char *msg, void *client_data) 
+void warning_callback(const char *msg, void *client_data)
 {
 	GF_LOG(GF_LOG_WARNING, GF_LOG_CODEC, ("[OpenJPEG] Warning %s", msg));
 }
 /**
 sample debug callback expecting no client object
 */
-void info_callback(const char *msg, void *client_data) 
+void info_callback(const char *msg, void *client_data)
 {
 	GF_LOG(GF_LOG_INFO, GF_LOG_CODEC, ("[OpenJPEG] Info %s", msg));
 }
@@ -182,11 +203,11 @@ static int int_ceildivpow2(int a, int b) {
 	return (a + (1 << b) - 1) >> b;
 }
 
-static GF_Err JP2_ProcessData(GF_MediaDecoder *ifcg, 
-							  char *inBuffer, u32 inBufferLength,
-							  u16 ES_ID,
-							  char *outBuffer, u32 *outBufferLength,
-							  u8 PaddingBits, u32 mmlevel)
+static GF_Err JP2_ProcessData(GF_MediaDecoder *ifcg,
+                              char *inBuffer, u32 inBufferLength,
+                              u16 ES_ID, u32 *CTS,
+                              char *outBuffer, u32 *outBufferLength,
+                              u8 PaddingBits, u32 mmlevel)
 {
 	u32 i, w, wr, h, hr, wh;
 	opj_dparameters_t parameters;	/* decompression parameters */
@@ -197,14 +218,12 @@ static GF_Err JP2_ProcessData(GF_MediaDecoder *ifcg,
 
 	JP2CTX();
 
-#if 1
 	switch (mmlevel) {
 	case GF_CODEC_LEVEL_SEEK:
 	case GF_CODEC_LEVEL_DROP:
 		*outBufferLength = 0;
 		return GF_OK;
 	}
-#endif
 
 	if (!ctx->image) {
 		/* configure the event callbacks (not required) */
@@ -230,7 +249,7 @@ static GF_Err JP2_ProcessData(GF_MediaDecoder *ifcg,
 		if (ctx->dsi) {
 			char *data;
 
-			data = gf_malloc(sizeof(char) * (ctx->dsi_size+inBufferLength));
+			data = (char*)gf_malloc(sizeof(char) * (ctx->dsi_size+inBufferLength));
 			memcpy(data, ctx->dsi, ctx->dsi_size);
 			memcpy(data+ctx->dsi_size, inBuffer, inBufferLength);
 			cio = opj_cio_open((opj_common_ptr)dinfo, data, ctx->dsi_size+inBufferLength);
@@ -252,11 +271,20 @@ static GF_Err JP2_ProcessData(GF_MediaDecoder *ifcg,
 			ctx->out_size = ctx->width * ctx->height * ctx->nb_comp /* * ctx->bpp / 8 */;
 
 			switch (ctx->nb_comp) {
-			case 1: ctx->pixel_format = GF_PIXEL_GREYSCALE; break;
-			case 2: ctx->pixel_format = GF_PIXEL_ALPHAGREY; break;
-			case 3: ctx->pixel_format = GF_PIXEL_RGB_24; break;
-			case 4: ctx->pixel_format = GF_PIXEL_RGBA; break;
-			default: return GF_NOT_SUPPORTED;
+			case 1:
+				ctx->pixel_format = GF_PIXEL_GREYSCALE;
+				break;
+			case 2:
+				ctx->pixel_format = GF_PIXEL_ALPHAGREY;
+				break;
+			case 3:
+				ctx->pixel_format = GF_PIXEL_RGB_24;
+				break;
+			case 4:
+				ctx->pixel_format = GF_PIXEL_RGBA;
+				break;
+			default:
+				return GF_NOT_SUPPORTED;
 			}
 
 			if ( *outBufferLength < ctx->out_size ) {
@@ -304,94 +332,94 @@ static GF_Err JP2_ProcessData(GF_MediaDecoder *ifcg,
 	else if (ctx->nb_comp==3) {
 
 		if ((ctx->image->comps[0].w==2*ctx->image->comps[1].w) && (ctx->image->comps[1].w==ctx->image->comps[2].w)
-			&& (ctx->image->comps[0].h==2*ctx->image->comps[1].h) && (ctx->image->comps[1].h==ctx->image->comps[2].h)) {
+		        && (ctx->image->comps[0].h==2*ctx->image->comps[1].h) && (ctx->image->comps[1].h==ctx->image->comps[2].h)) {
 
-				if (ctx->pixel_format != GF_PIXEL_YV12) {
-					ctx->pixel_format = GF_PIXEL_YV12;
-					ctx->out_size = 3*ctx->width*ctx->height/2;
-					*outBufferLength = ctx->out_size;
-					return GF_BUFFER_TOO_SMALL;
-				}
+			if (ctx->pixel_format != GF_PIXEL_YV12) {
+				ctx->pixel_format = GF_PIXEL_YV12;
+				ctx->out_size = 3*ctx->width*ctx->height/2;
+				*outBufferLength = ctx->out_size;
+				return GF_BUFFER_TOO_SMALL;
+			}
 
-				if ((w==wr) && (h==hr)) {
-					for (i=0; i<wh; i++) {
-						*outBuffer = ctx->image->comps[0].data[i];
-						outBuffer++;
-					}
-					w = ctx->image->comps[1].w;
-					wr = int_ceildivpow2(ctx->image->comps[1].w, ctx->image->comps[1].factor);
-					h = ctx->image->comps[1].h;
-					hr = int_ceildivpow2(ctx->image->comps[1].h, ctx->image->comps[1].factor);
-					wh = wr*hr;
-					for (i=0; i<wh; i++) {
-						*outBuffer = ctx->image->comps[1].data[i];
-						outBuffer++;
-					}
-					for (i=0; i<wh; i++) {
-						*outBuffer = ctx->image->comps[2].data[i];
-						outBuffer++;
-					}
-				} else {
-					for (i=0; i<wh; i++) {
-						*outBuffer = ctx->image->comps[0].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-					}
-					w = ctx->image->comps[1].w;
-					wr = int_ceildivpow2(ctx->image->comps[1].w, ctx->image->comps[1].factor);
-					h = ctx->image->comps[1].h;
-					hr = int_ceildivpow2(ctx->image->comps[1].h, ctx->image->comps[1].factor);
-					wh = wr*hr;
-					for (i=0; i<wh; i++) {
-						*outBuffer = ctx->image->comps[1].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-					}
-					for (i=0; i<wh; i++) {
-						*outBuffer = ctx->image->comps[2].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-					}
+			if ((w==wr) && (h==hr)) {
+				for (i=0; i<wh; i++) {
+					*outBuffer = ctx->image->comps[0].data[i];
+					outBuffer++;
 				}
+				w = ctx->image->comps[1].w;
+				wr = int_ceildivpow2(ctx->image->comps[1].w, ctx->image->comps[1].factor);
+				h = ctx->image->comps[1].h;
+				hr = int_ceildivpow2(ctx->image->comps[1].h, ctx->image->comps[1].factor);
+				wh = wr*hr;
+				for (i=0; i<wh; i++) {
+					*outBuffer = ctx->image->comps[1].data[i];
+					outBuffer++;
+				}
+				for (i=0; i<wh; i++) {
+					*outBuffer = ctx->image->comps[2].data[i];
+					outBuffer++;
+				}
+			} else {
+				for (i=0; i<wh; i++) {
+					*outBuffer = ctx->image->comps[0].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+				}
+				w = ctx->image->comps[1].w;
+				wr = int_ceildivpow2(ctx->image->comps[1].w, ctx->image->comps[1].factor);
+				h = ctx->image->comps[1].h;
+				hr = int_ceildivpow2(ctx->image->comps[1].h, ctx->image->comps[1].factor);
+				wh = wr*hr;
+				for (i=0; i<wh; i++) {
+					*outBuffer = ctx->image->comps[1].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+				}
+				for (i=0; i<wh; i++) {
+					*outBuffer = ctx->image->comps[2].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+				}
+			}
 
 
 		} else if ((ctx->image->comps[0].w==ctx->image->comps[1].w) && (ctx->image->comps[1].w==ctx->image->comps[2].w)
-			&& (ctx->image->comps[0].h==ctx->image->comps[1].h) && (ctx->image->comps[1].h==ctx->image->comps[2].h)) {
+		           && (ctx->image->comps[0].h==ctx->image->comps[1].h) && (ctx->image->comps[1].h==ctx->image->comps[2].h)) {
 
-				if ((w==wr) && (h==hr)) {
-					for (i=0; i<wh; i++) {
-						u32 idx = 3*i;
-						outBuffer[idx] = ctx->image->comps[0].data[i];
-						outBuffer[idx+1] = ctx->image->comps[1].data[i];
-						outBuffer[idx+2] = ctx->image->comps[2].data[i];
-					}
-				} else {
-					for (i=0; i<wh; i++) {
-						u32 idx = 3*i;
-						outBuffer[idx] = ctx->image->comps[0].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-						outBuffer[idx+1] = ctx->image->comps[1].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-						outBuffer[idx+2] = ctx->image->comps[2].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-					}
+			if ((w==wr) && (h==hr)) {
+				for (i=0; i<wh; i++) {
+					u32 idx = 3*i;
+					outBuffer[idx] = ctx->image->comps[0].data[i];
+					outBuffer[idx+1] = ctx->image->comps[1].data[i];
+					outBuffer[idx+2] = ctx->image->comps[2].data[i];
 				}
+			} else {
+				for (i=0; i<wh; i++) {
+					u32 idx = 3*i;
+					outBuffer[idx] = ctx->image->comps[0].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+					outBuffer[idx+1] = ctx->image->comps[1].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+					outBuffer[idx+2] = ctx->image->comps[2].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+				}
+			}
 		}
 	}
 	else if (ctx->nb_comp==4) {
 		if ((ctx->image->comps[0].w==ctx->image->comps[1].w) && (ctx->image->comps[1].w==ctx->image->comps[2].w) && (ctx->image->comps[2].w==ctx->image->comps[3].w)
-			&& (ctx->image->comps[0].h==ctx->image->comps[1].h) && (ctx->image->comps[1].h==ctx->image->comps[2].h) && (ctx->image->comps[2].h==ctx->image->comps[3].h)) {
+		        && (ctx->image->comps[0].h==ctx->image->comps[1].h) && (ctx->image->comps[1].h==ctx->image->comps[2].h) && (ctx->image->comps[2].h==ctx->image->comps[3].h)) {
 
-				if ((w==wr) && (h==hr)) {
-					for (i=0; i<wh; i++) {
-						u32 idx = 4*i;
-						outBuffer[idx] = ctx->image->comps[0].data[i];
-						outBuffer[idx+1] = ctx->image->comps[1].data[i];
-						outBuffer[idx+2] = ctx->image->comps[2].data[i];
-						outBuffer[idx+3] = ctx->image->comps[3].data[i];
-					}
-				} else {
-					for (i=0; i<wh; i++) {
-						u32 idx = 4*i;
-						outBuffer[idx] = ctx->image->comps[0].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-						outBuffer[idx+1] = ctx->image->comps[1].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-						outBuffer[idx+2] = ctx->image->comps[2].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-						outBuffer[idx+3] = ctx->image->comps[3].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
-					}
+			if ((w==wr) && (h==hr)) {
+				for (i=0; i<wh; i++) {
+					u32 idx = 4*i;
+					outBuffer[idx] = ctx->image->comps[0].data[i];
+					outBuffer[idx+1] = ctx->image->comps[1].data[i];
+					outBuffer[idx+2] = ctx->image->comps[2].data[i];
+					outBuffer[idx+3] = ctx->image->comps[3].data[i];
 				}
+			} else {
+				for (i=0; i<wh; i++) {
+					u32 idx = 4*i;
+					outBuffer[idx] = ctx->image->comps[0].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+					outBuffer[idx+1] = ctx->image->comps[1].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+					outBuffer[idx+2] = ctx->image->comps[2].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+					outBuffer[idx+3] = ctx->image->comps[3].data[w * hr - ((i) / (wr) + 1) * w + (i) % (wr)];
+				}
+			}
 		}
-	}	
+	}
 
 	/* gf_free( image data structure */
 	if (ctx->image) {
@@ -421,14 +449,14 @@ Bool NewJP2Dec(GF_BaseDecoder *ifcd)
 	wrap->opaque = dec;
 	wrap->type = DEC_JPEG;
 
-	/*setup our own interface*/	
+	/*setup our own interface*/
 	ifcd->AttachStream = JP2_AttachStream;
 	ifcd->DetachStream = JP2_DetachStream;
 	ifcd->GetCapabilities = JP2_GetCapabilities;
 	ifcd->SetCapabilities = JP2_SetCapabilities;
 	ifcd->GetName = JP2_GetCodecName;
 	((GF_MediaDecoder *)ifcd)->ProcessData = JP2_ProcessData;
-	return 1;
+	return GF_TRUE;
 }
 
 void DeleteJP2Dec(GF_BaseDecoder *ifcg)

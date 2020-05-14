@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -29,7 +29,7 @@
 GF_STENCIL gdip_new_stencil(GF_Raster2D *, GF_StencilType type)
 {
 	struct _stencil *sten;
-	
+
 	switch (type) {
 	case GF_STENCIL_SOLID:
 	case GF_STENCIL_LINEAR_GRADIENT:
@@ -80,7 +80,7 @@ GF_Err gdip_set_brush_color(GF_STENCIL _this, GF_Color c)
 {
 	GPSTEN();
 	CHECK_RET(GF_STENCIL_SOLID);
-	if (!_sten->pSolid) 
+	if (!_sten->pSolid)
 		GdipCreateSolidFill(c, &_sten->pSolid);
 	else
 		GdipSetSolidFillColor(_sten->pSolid, c);
@@ -95,11 +95,11 @@ GF_Err gdip_set_gradient_mode(GF_STENCIL _this, GF_GradientMode mode)
 	GPSTEN();
 	CHECK2_RET(GF_STENCIL_LINEAR_GRADIENT, GF_STENCIL_RADIAL_GRADIENT);
 	_sten->spread = mode;
-	_sten->needs_rebuild = 1;
+	_sten->needs_rebuild = GF_TRUE;
 	return GF_OK;
 }
 
-static 
+static
 GF_Err gdip_set_linear_gradient (GF_STENCIL _this, Fixed start_x, Fixed start_y, Fixed end_x, Fixed end_y)
 {
 	GPSTEN();
@@ -114,7 +114,7 @@ GF_Err gdip_set_linear_gradient (GF_STENCIL _this, Fixed start_x, Fixed start_y,
 	GdipCreateLineBrush(&_sten->start, &_sten->end, 0xFF000000, 0xFFFFFFFF, WrapModeTile, &_sten->pLinear);
 	if (!_sten->pLinearMat) GdipCreateMatrix(&_sten->pLinearMat);
 	GdipGetLineTransform(_sten->pLinear, _sten->pLinearMat);
-	_sten->needs_rebuild = 1;
+	_sten->needs_rebuild = GF_TRUE;
 	return GF_OK;
 }
 
@@ -126,7 +126,7 @@ void gdip_recompute_line_gradient(GF_STENCIL _this)
 	GPSTEN();
 
 	if (!_sten->needs_rebuild) return;
-	_sten->needs_rebuild = 0;
+	_sten->needs_rebuild = GF_FALSE;
 
 	if (_sten->pLinear) GdipDeleteBrush(_sten->pLinear);
 	GdipCreateLineBrush(&_sten->start, &_sten->end, 0xFFFF0000, 0xFFFF00FF, WrapModeTile, &_sten->pLinear);
@@ -142,7 +142,7 @@ void gdip_recompute_line_gradient(GF_STENCIL _this)
 		GdipSetLinePresetBlend(_sten->pLinear, (ARGB *) _sten->cols, _sten->pos, _sten->num_pos);
 		return;
 	}
-	/*currently gdiplus doesn't support padded mode on gradients, so update the line gradient by 
+	/*currently gdiplus doesn't support padded mode on gradients, so update the line gradient by
 	using a line 3 times longer*/
 	w = _sten->end.X - _sten->start.X;
 	h = _sten->end.Y - _sten->start.Y;
@@ -173,7 +173,7 @@ void gdip_recompute_line_gradient(GF_STENCIL _this)
 	cases the x3 dilatation is enough*/
 	GdipSetLineWrapMode(_sten->pLinear, WrapModeTileFlipXY);
 	GdipSetLinePresetBlend(_sten->pLinear, cols, pos, 2+_sten->num_pos);
-	
+
 	delete [] cols;
 	delete [] pos;
 }
@@ -191,7 +191,7 @@ void gdip_recompute_radial_gradient(GF_STENCIL _this)
 
 
 	if (!_sten->needs_rebuild) return;
-	_sten->needs_rebuild = 0;
+	_sten->needs_rebuild = GF_FALSE;
 
 
 	if (_sten->pRadial) {
@@ -212,22 +212,22 @@ void gdip_recompute_radial_gradient(GF_STENCIL _this)
 	if (_sten->spread == GF_GRADIENT_MODE_PAD) {
 
 
-		GdipAddPathEllipse(_sten->circle, - _sten->radius.X, -_sten->radius.Y, 
-								2*_sten->radius.X, 2*_sten->radius.Y);
-	
+		GdipAddPathEllipse(_sten->circle, - _sten->radius.X, -_sten->radius.Y,
+		                   2*_sten->radius.X, 2*_sten->radius.Y);
+
 		GdipCreatePathGradientFromPath(_sten->circle, &_sten->pRadial);
 
 		ARGB *blends = new ARGB[_sten->num_pos + 1];
 
 		/*radial blend pos are from bounds to center in gdiplus*/
 		blends[0] = _sten->cols[_sten->num_pos - 1];
-		for (i=0; i<_sten->num_pos;i++) {
+		for (i=0; i<_sten->num_pos; i++) {
 			blends[i+1] = _sten->cols[_sten->num_pos - i - 1];
 		}
-	
+
 		REAL *pos = new REAL[_sten->num_pos + 1];
 		pos[0] = 0;
-		for (i=0; i<_sten->num_pos;i++) {
+		for (i=0; i<_sten->num_pos; i++) {
 			pos[i+1] = _sten->pos[i];
 		}
 
@@ -239,7 +239,7 @@ void gdip_recompute_radial_gradient(GF_STENCIL _this)
 		pt = _sten->focal;
 		pt.X -= _sten->center.X;
 		pt.Y -= _sten->center.Y;
-		GdipSetPathGradientCenterPoint(_sten->pRadial, &pt);	
+		GdipSetPathGradientCenterPoint(_sten->pRadial, &pt);
 
 		/*set transform*/
 		GdipCreateMatrix(&mat);
@@ -251,14 +251,14 @@ void gdip_recompute_radial_gradient(GF_STENCIL _this)
 		/*create back brush*/
 		GdipCreateSolidFill(_sten->cols[_sten->num_pos - 1], &_sten->pSolid);
 		GdipResetPath(_sten->circle);
-		GdipAddPathEllipse(_sten->circle, - _sten->radius.X + _sten->center.X, -_sten->radius.Y + _sten->center.Y, 
-								2*_sten->radius.X, 2*_sten->radius.Y);
+		GdipAddPathEllipse(_sten->circle, - _sten->radius.X + _sten->center.X, -_sten->radius.Y + _sten->center.Y,
+		                   2*_sten->radius.X, 2*_sten->radius.Y);
 
 	} else {
 		repeat = 10;
 
-		GdipAddPathEllipse(_sten->circle, - repeat * _sten->radius.X, - repeat*_sten->radius.Y, 
-								2*repeat*_sten->radius.X,  2*repeat*_sten->radius.Y);
+		GdipAddPathEllipse(_sten->circle, - repeat * _sten->radius.X, - repeat*_sten->radius.Y,
+		                   2*repeat*_sten->radius.X,  2*repeat*_sten->radius.Y);
 
 		GdipCreatePathGradientFromPath(_sten->circle, &_sten->pRadial);
 		GdipDeletePath(_sten->circle);
@@ -296,13 +296,13 @@ void gdip_recompute_radial_gradient(GF_STENCIL _this)
 		pt = _sten->focal;
 		pt.X -= (1 - repeat) * (_sten->focal.X - _sten->center.X) + _sten->center.X;
 		pt.Y -= (1 - repeat) * (_sten->focal.Y - _sten->center.Y) + _sten->center.Y;
-		GdipSetPathGradientCenterPoint(_sten->pRadial, &pt);	
+		GdipSetPathGradientCenterPoint(_sten->pRadial, &pt);
 
 		/*set transform*/
 		GdipCreateMatrix(&mat);
 		GdipTranslateMatrix(mat, (1 - repeat) * (_sten->focal.X - _sten->center.X) + _sten->center.X,
-								(1 - repeat) * (_sten->focal.Y - _sten->center.Y) + _sten->center.Y, 
-								MatrixOrderAppend);
+		                    (1 - repeat) * (_sten->focal.Y - _sten->center.Y) + _sten->center.Y,
+		                    MatrixOrderAppend);
 		if (_sten->pMat) GdipMultiplyMatrix(mat, _sten->pMat, MatrixOrderAppend);
 		GdipSetTextureTransform((GpTexture*)_sten->pRadial, mat);
 		GdipDeleteMatrix(mat);
@@ -311,7 +311,7 @@ void gdip_recompute_radial_gradient(GF_STENCIL _this)
 	}
 }
 
-static 
+static
 GF_Err gdip_set_radial_gradient(GF_STENCIL _this, Fixed cx, Fixed cy, Fixed fx, Fixed fy, Fixed x_radius, Fixed y_radius)
 {
 	GPSTEN();
@@ -324,7 +324,7 @@ GF_Err gdip_set_radial_gradient(GF_STENCIL _this, Fixed cx, Fixed cy, Fixed fx, 
 	_sten->center.Y = FIX2FLT(cy);
 	_sten->focal.X = FIX2FLT(fx);
 	_sten->focal.Y = FIX2FLT(fy);
-	_sten->needs_rebuild = 1;
+	_sten->needs_rebuild = GF_TRUE;
 	return GF_OK;
 }
 
@@ -343,12 +343,12 @@ GF_Err gdip_set_gradient_interpolation(GF_STENCIL _this, Fixed *pos, GF_Color *c
 	for (i=0; i<count; i++) _sten->pos[i] = FIX2FLT(pos[i]);
 	memcpy(_sten->cols, col, sizeof(ARGB)*count);
 	_sten->num_pos = count;
-	_sten->needs_rebuild = 1;
+	_sten->needs_rebuild = GF_TRUE;
 	return GF_OK;
 }
 
 
-static 
+static
 GF_Err gdip_set_vertex_path(GF_STENCIL _this, GF_Path *path)
 {
 	GPSTEN();
@@ -361,7 +361,7 @@ GF_Err gdip_set_vertex_path(GF_STENCIL _this, GF_Path *path)
 	return GF_OK;
 }
 
-static 
+static
 GF_Err gdip_set_vertex_center (GF_STENCIL _this, Fixed cx, Fixed cy, u32 color)
 {
 	GpStatus ret;

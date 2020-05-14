@@ -2,7 +2,7 @@ include ../../config.mak
 
 vpath %.c $(SRC_PATH)/modules/freenect
 
-CFLAGS= $(CPPFLAGS) -I"$(SRC_PATH)/include" $(FREENECT_CFLAGS)
+CFLAGS= $(CXXFLAGS) -I"$(SRC_PATH)/include" -DGPAC_HAVE_CONFIG_H -I../.. $(FREENECT_CFLAGS)
 
 ifeq ($(DEBUGBUILD), yes)
 CFLAGS+=-g
@@ -30,14 +30,14 @@ OBJS=freenect.o
 
 SRCS := $(OBJS:.o=.c) 
 
-LIB=gm_freenect.$(DYN_LIB_SUFFIX)
+LIB=gm_freenect$(DYN_LIB_SUFFIX)
 
 
 all: $(LIB)
 
 
 $(LIB): $(OBJS)
-	$(CXX) -w $(SHFLAGS) $(LDFLAGS) -o ../../bin/gcc/$@ $(OBJS) $(LINKLIBS)
+	$(CXX) -w $(SHFLAGS) -o ../../bin/gcc/$@ $(OBJS) $(LINKLIBS) $(LDFLAGS)
 
 clean: 
 	rm -f $(OBJS) ../../bin/gcc/$(LIB)
@@ -51,10 +51,4 @@ depend:
 distclean: clean
 	rm -f Makefile.bak .depend
 
-
-
-# include dependency files if they exist
-#
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+-include .depend

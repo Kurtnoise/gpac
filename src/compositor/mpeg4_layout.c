@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -32,7 +32,7 @@
 typedef struct
 {
 	PARENT_MPEG4_STACK_2D
-	
+
 	Bool is_scrolling;
 	u32 start_scroll_type;
 	Double start_time, pause_time;
@@ -43,6 +43,7 @@ typedef struct
 	/*for keyboard navigation*/
 	GF_SensorHandler hdl;
 	s32 key_scroll;
+	Bool keys_active;
 } LayoutStack;
 
 typedef struct
@@ -68,10 +69,6 @@ static LineInfo *new_line_info(LayoutStack *st)
 
 	gf_list_add(st->lines, li);
 	return li;
-}
-static GFINLINE LineInfo *get_line_info(LayoutStack *st, u32 i)
-{
-	return (LineInfo *) gf_list_get(st->lines, i);
 }
 
 
@@ -105,7 +102,7 @@ static void get_lines_info(LayoutStack *st, M_Layout *l)
 	max_w = st->clip.width;
 	max_h = st->clip.height;
 	layout_reset_lines(st);
-	
+
 	count = gf_list_count(st->groups);
 	if (!count) return;
 
@@ -139,7 +136,7 @@ static void get_lines_info(LayoutStack *st, M_Layout *l)
 						li->width -= prev_discard_width;
 						li->nb_children--;
 					}
-					if ((cg->text_type==1) && (i+1==count)) break; 
+					if ((cg->text_type==1) && (i+1==count)) break;
 
 					li = new_line_info(st);
 					li->first_child = i;
@@ -147,9 +144,9 @@ static void get_lines_info(LayoutStack *st, M_Layout *l)
 						li->first_child++;
 						continue;
 					}
-				} 
+				}
 			}
-		
+
 			/*get ascent/descent for text or height for non-text*/
 			if (cg->ascent) {
 				if (li->ascent < cg->ascent) li->ascent = cg->ascent;
@@ -177,7 +174,7 @@ static void layout_justify(LayoutStack *st, M_Layout *l)
 	get_lines_info(st, l);
 	major = get_justify(l, 0);
 	minor = get_justify(l, 1);
-	
+
 	st->scroll_len = 0;
 	nbLines = gf_list_count(st->lines);
 	if (l->horizontal) {
@@ -197,9 +194,10 @@ static void layout_justify(LayoutStack *st, M_Layout *l)
 			if (!l->leftToRight) first += li->nb_children - 1;
 
 			if (!l->topToBottom && k) current_top += li->height;
-			
+
 			/*set major alignment (X) */
 			cg = (ChildGroup *)gf_list_get(st->groups, first);
+			if (!cg) continue;
 			switch (major) {
 			case L_END:
 				cg->final.x = st->clip.x + st->clip.width - li->width;
@@ -222,10 +220,10 @@ static void layout_justify(LayoutStack *st, M_Layout *l)
 						if ( (k+1==nbLines) || li->line_break) {
 							spacing = 0;
 						}
-					}					
+					}
 				}
 				break;
-			}          
+			}
 
 
 			/*for each in the run */
@@ -267,7 +265,7 @@ static void layout_justify(LayoutStack *st, M_Layout *l)
 				if (l->leftToRight && (i==li->first_child + li->nb_children))
 					break;
 				else if (!l->leftToRight && (i==li->first_child - 1))
-					break;		
+					break;
 			}
 			if (l->topToBottom) {
 				current_top -= gf_mulfix(l->spacing, li->height);
@@ -299,7 +297,7 @@ static void layout_justify(LayoutStack *st, M_Layout *l)
 
 		first = li->first_child;
 		if (!l->topToBottom) first += li->nb_children - 1;
-		
+
 		/*set major alignment (Y) */
 		cg = (ChildGroup *)gf_list_get(st->groups, first);
 		switch (major) {
@@ -320,7 +318,7 @@ static void layout_justify(LayoutStack *st, M_Layout *l)
 				if (spacing<0) spacing = 0;
 			}
 			break;
-		}          
+		}
 
 		/*for each in the run */
 		i = first;
@@ -352,7 +350,7 @@ static void layout_justify(LayoutStack *st, M_Layout *l)
 			if (l->topToBottom && (i==li->first_child + li->nb_children))
 				break;
 			else if (!l->topToBottom && (i==li->first_child - 1))
-				break;		
+				break;
 		}
 		if (l->leftToRight) {
 			current_left += gf_mulfix(l->spacing, li->width);
@@ -409,7 +407,7 @@ static void layout_setup_scroll_bounds(LayoutStack *st, M_Layout *l)
 			}
 			break;
 		}
-	} 
+	}
 	/*scroll-in only*/
 	else {
 		st->scroll_max = 0;
@@ -467,7 +465,7 @@ static void layout_setup_scroll_bounds(LayoutStack *st, M_Layout *l)
 static void layout_scroll(GF_TraverseState *tr_state, LayoutStack *st, M_Layout *l)
 {
 	u32 i, nb_lines;
-	Fixed scrolled, rate, ellapsed, scroll_diff;
+	Fixed scrolled, rate, elapsed, scroll_diff;
 	Bool smooth, do_scroll, stop_anim;
 	Double time = 0;
 	ChildGroup *cg;
@@ -486,12 +484,12 @@ static void layout_scroll(GF_TraverseState *tr_state, LayoutStack *st, M_Layout 
 
 		time = gf_node_get_scene_time((GF_Node *)l);
 
-	//	if (st->scale_scroll && (st->prev_rate!=st->scale_scroll)) st->start_scroll_type = 1;
+		//	if (st->scale_scroll && (st->prev_rate!=st->scale_scroll)) st->start_scroll_type = 1;
 
-		/*if scroll rate changed to previous non-zero value, this is a 
+		/*if scroll rate changed to previous non-zero value, this is a
 		scroll restart, don't re-update bounds*/
 		if ((st->start_scroll_type==2) && (st->prev_rate==st->scale_scroll)) st->start_scroll_type = 0;
-		
+
 		if (st->start_scroll_type) {
 			st->start_time = time;
 			st->is_scrolling = 1;
@@ -526,8 +524,8 @@ static void layout_scroll(GF_TraverseState *tr_state, LayoutStack *st, M_Layout 
 		}
 
 		/*compute advance in pixels for smooth scroll*/
-		ellapsed = FLT2FIX((Float) (time - st->start_time));
-		scrolled = gf_mulfix(ellapsed, rate);
+		elapsed = FLT2FIX((Float) (time - st->start_time));
+		scrolled = gf_mulfix(elapsed, rate);
 	}
 
 	smooth = l->smoothScroll;
@@ -539,7 +537,6 @@ static void layout_scroll(GF_TraverseState *tr_state, LayoutStack *st, M_Layout 
 
 	stop_anim = 0;
 	/*compute scroll diff for non-smooth mode*/
-	do_scroll = 1;
 	if (smooth) {
 		do_scroll = 1;
 	} else {
@@ -562,8 +559,8 @@ static void layout_scroll(GF_TraverseState *tr_state, LayoutStack *st, M_Layout 
 				}
 				break;
 			} else if (ABS(scroll_diff) >= dim) {
-				if (scroll_diff<0) scroll_diff = -dim;
-				else scroll_diff = dim;
+//				if (scroll_diff<0) scroll_diff = -dim;
+//				else scroll_diff = dim;
 				do_scroll = 1;
 				break;
 			}
@@ -580,7 +577,7 @@ static void layout_scroll(GF_TraverseState *tr_state, LayoutStack *st, M_Layout 
 		scrolled = scroll_diff;
 	}
 
-	if (do_scroll) 
+	if (do_scroll)
 		st->last_scroll = scrolled;
 	else
 		scrolled = st->last_scroll;
@@ -621,7 +618,7 @@ static void TraverseLayout(GF_Node *node, void *rs, Bool is_destroy)
 	u32 i;
 	ChildGroup *cg;
 	GF_IRect prev_clip;
-	Bool mode_bckup, had_clip;
+	Bool mode_bckup, had_clip=GF_FALSE;
 	ParentNode2D *parent_bck;
 	GF_Rect prev_clipper;
 	M_Layout *l = (M_Layout *)node;
@@ -635,7 +632,7 @@ static void TraverseLayout(GF_Node *node, void *rs, Bool is_destroy)
 		gf_free(st);
 		return;
 	}
-	
+
 	/*note we don't clear dirty flag, this is done in traversing*/
 	if (gf_node_dirty_get(node) & GF_SG_NODE_DIRTY) {
 
@@ -651,12 +648,12 @@ static void TraverseLayout(GF_Node *node, void *rs, Bool is_destroy)
 		st->bounds = st->clip = gf_rect_center(st->clip.width, st->clip.height);
 
 		if (st->scale_scroll && !st->start_scroll_type) st->start_scroll_type = 1;
-	
+
 		drawable_reset_group_highlight(tr_state, node);
 	}
 
 	/*don't waste time traversing is pick ray not in clipper*/
-	if ((tr_state->traversing_mode==TRAVERSE_PICK) && !gf_sc_pick_in_clipper(tr_state, &st->clip)) 
+	if ((tr_state->traversing_mode==TRAVERSE_PICK) && !gf_sc_pick_in_clipper(tr_state, &st->clip))
 		goto layout_exit;
 
 	if ((tr_state->traversing_mode==TRAVERSE_GET_BOUNDS) && !tr_state->for_node) {
@@ -668,7 +665,7 @@ static void TraverseLayout(GF_Node *node, void *rs, Bool is_destroy)
 	}
 
 	recompute_layout = 0;
-	if (gf_node_dirty_get(node)) 
+	if (gf_node_dirty_get(node))
 		recompute_layout = 1;
 
 	/*setup clipping*/
@@ -681,7 +678,7 @@ static void TraverseLayout(GF_Node *node, void *rs, Bool is_destroy)
 		}
 	}
 	if (recompute_layout) {
-		GF_LOG(GF_LOG_COMPOSE, GF_LOG_DEBUG, ("[Layout] recomputing positions\n"));
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Layout] recomputing positions\n"));
 
 		parent_node_reset((ParentNode2D*)st);
 
@@ -707,7 +704,7 @@ static void TraverseLayout(GF_Node *node, void *rs, Bool is_destroy)
 
 		/*apply justification*/
 		layout_justify(st, l);
-		
+
 		/*if scrolling, update bounds*/
 		if (l->scrollRate && st->is_scrolling) {
 			layout_setup_scroll_bounds(st, l);
@@ -766,20 +763,31 @@ static Bool OnLayout(GF_SensorHandler *sh, Bool is_over, Bool is_cancel, GF_Even
 
 	switch (ev->key.key_code) {
 	case GF_KEY_LEFT:
+		if (!st->keys_active) return 0;
+
 		if (vertical) return 0;
 		st->key_scroll = -1;
 		break;
 	case GF_KEY_RIGHT:
+		if (!st->keys_active) return 0;
+
 		if (vertical) return 0;
 		st->key_scroll = +1;
 		break;
 	case GF_KEY_UP:
+		if (!st->keys_active) return 0;
+
 		if (!vertical) return 0;
 		st->key_scroll = +1;
 		break;
 	case GF_KEY_DOWN:
+		if (!st->keys_active) return 0;
+
 		if (!vertical) return 0;
 		st->key_scroll = -1;
+		break;
+	case GF_KEY_ENTER:
+		st->keys_active = !st->keys_active;
 		break;
 	default:
 		st->key_scroll = 0;
@@ -800,6 +808,10 @@ void compositor_init_layout(GF_Compositor *compositor, GF_Node *node)
 {
 	LayoutStack *stack;
 	GF_SAFEALLOC(stack, LayoutStack);
+	if (!stack) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate layout stack\n"));
+		return;
+	}
 
 	parent_node_setup((ParentNode2D*)stack);
 	stack->lines = gf_list_new();
@@ -816,7 +828,7 @@ void compositor_layout_modified(GF_Compositor *compositor, GF_Node *node)
 	/*if modif other than scrollrate restart scroll*/
 	if (st->scroll_rate == ((M_Layout*)node)->scrollRate) {
 		st->start_scroll_type = 1;
-	} 
+	}
 	/*if modif on scroll rate only, indicate continous restart*/
 	else if (((M_Layout*)node)->scrollRate) {
 		st->start_scroll_type = 2;

@@ -32,7 +32,7 @@
 #include <gpac/tools.h>
 #include <libavcodec/avcodec.h>
 
-#if (LIBAVCODEC_VERSION_MAJOR <= 52) && (LIBAVCODEC_VERSION_MINOR <= 20)
+#if ((LIBAVCODEC_VERSION_MAJOR == 52) && (LIBAVCODEC_VERSION_MINOR <= 20)) || (LIBAVCODEC_VERSION_MAJOR < 52)
 #undef USE_AVCODEC2
 #else
 #define USE_AVCODEC2	1
@@ -56,52 +56,94 @@ typedef struct avr_ts_muxer GF_AbstractTSMuxer;
 #endif
 
 
+
+/*TODO - we need to cleanup the ffmpeg code to align with only latest version and remove old compatibility code*/
+#ifndef CODEC_ID_MJPEG
+
+#define CODEC_ID_SVQ3	AV_CODEC_ID_SVQ3
+#define CODEC_ID_MPEG4	AV_CODEC_ID_MPEG4
+#define CODEC_ID_H264	AV_CODEC_ID_H264
+#define CODEC_ID_MPEG2VIDEO AV_CODEC_ID_MPEG2VIDEO
+#define CODEC_ID_MJPEG	AV_CODEC_ID_MJPEG
+#define CODEC_ID_MP2	AV_CODEC_ID_MP2
+#define CODEC_ID_AC3	AV_CODEC_ID_AC3
+#define CODEC_ID_EAC3	AV_CODEC_ID_EAC3
+#define CODEC_ID_DVD_SUBTITLE	AV_CODEC_ID_DVD_SUBTITLE
+#define CODEC_ID_RAWVIDEO	AV_CODEC_ID_RAWVIDEO
+#define CODEC_ID_MJPEGB	AV_CODEC_ID_MJPEGB
+#define CODEC_ID_LJPEG	AV_CODEC_ID_LJPEG
+#define CODEC_ID_GIF	AV_CODEC_ID_GIF
+#define CODEC_ID_H263	AV_CODEC_ID_H263
+#define CODEC_ID_MP3	AV_CODEC_ID_MP3
+#define CODEC_ID_AAC	AV_CODEC_ID_AAC
+#define CODEC_ID_MPEG1VIDEO	AV_CODEC_ID_MPEG1VIDEO
+#define CODEC_ID_MSMPEG4V3	AV_CODEC_ID_MSMPEG4V3
+#define CODEC_ID_RV10	AV_CODEC_ID_RV10
+#define CODEC_ID_H263P	AV_CODEC_ID_H263P
+#define CODEC_ID_H263I	AV_CODEC_ID_H263I
+#endif
+
+#ifndef PIX_FMT_YUV420P
+#define PIX_FMT_YUV420P AV_PIX_FMT_YUV420P
+#define PIX_FMT_YUV420P10LE AV_PIX_FMT_YUV420P10LE
+#define PIX_FMT_BGR24 AV_PIX_FMT_BGR24
+#define PIX_FMT_RGB24 AV_PIX_FMT_RGB24
+#define PIX_FMT_YUVJ420P AV_PIX_FMT_YUVJ420P
+#endif
+
+#if (LIBAVCODEC_VERSION_MAJOR>56)
+#ifndef FF_API_AVFRAME_LAVC
+#define FF_API_AVFRAME_LAVC
+#endif
+
+#endif
+
 #include <gpac/ringbuffer.h>
 
 typedef struct
 {
-    GF_Terminal *term;
+	GF_Terminal *term;
 
-    Bool is_open;
-    GF_AudioListener audio_listen;
-    GF_VideoListener video_listen;
-    GF_TermEventFilter term_listen;
+	Bool is_open;
+	GF_AudioListener audio_listen;
+	GF_VideoListener video_listen;
+	GF_TermEventFilter term_listen;
 #ifdef AVR_DUMP_RAW_AVI
-    avi_t *avi_out;
+	avi_t *avi_out;
 #endif
-    char *frame;
-    u32 size;
-    GF_AbstractTSMuxer * ts_implementation;
-    Bool encode;
-    AVCodec *audioCodec;
-    AVCodec *videoCodec;
-    AVFrame *YUVpicture, *RGBpicture;
-    struct SwsContext * swsContext;
-    uint8_t * yuv_data;
-    uint8_t * videoOutbuf;
-    u32 videoOutbufSize;
-    GF_Ringbuffer * pcmAudio;
-    u32 audioCurrentTime;
-    GF_Thread * encodingThread;
-    GF_Thread * audioEncodingThread;
-    GF_Mutex * frameMutex;
-    GF_Mutex * encodingMutex;
-    volatile Bool is_running;
-    u64 frameTime;
-    u64 frameTimeEncoded;
-    /**
-     * Audio parameters for encoding
-     */
-    u32 audioSampleRate;
-    u16 audioChannels;
-    /**
-     * Video parameters for encoding
-     */
-    u32 srcWidth;
-    u32 srcHeight;
-    const char * destination;
-    GF_GlobalLock * globalLock;
-    Bool started;
+	char *frame;
+	u32 size;
+	GF_AbstractTSMuxer * ts_implementation;
+	Bool encode;
+	AVCodec *audioCodec;
+	AVCodec *videoCodec;
+	AVFrame *YUVpicture, *RGBpicture;
+	struct SwsContext * swsContext;
+	uint8_t * yuv_data;
+	uint8_t * videoOutbuf;
+	u32 videoOutbufSize;
+	GF_Ringbuffer * pcmAudio;
+	u32 audioCurrentTime;
+	GF_Thread * encodingThread;
+	GF_Thread * audioEncodingThread;
+	GF_Mutex * frameMutex;
+	GF_Mutex * encodingMutex;
+	volatile Bool is_running;
+	u64 frameTime;
+	u64 frameTimeEncoded;
+	/**
+	 * Audio parameters for encoding
+	 */
+	u32 audioSampleRate;
+	u16 audioChannels;
+	/**
+	 * Video parameters for encoding
+	 */
+	u32 srcWidth;
+	u32 srcHeight;
+	const char * destination;
+	GF_GlobalLock * globalLock;
+	Bool started;
 } GF_AVRedirect;
 
 GF_AbstractTSMuxer * ts_amux_new(GF_AVRedirect * avr, u32 videoBitrateInBitsPerSec, u32 width, u32 height, u32 audioBitRateInBitsPerSec);

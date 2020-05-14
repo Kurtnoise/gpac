@@ -15,13 +15,13 @@ LDFLAGS+=-pg
 endif
 
 ## libgpac objects gathering: src/utils
-LIBGPAC_UTILS=utils/os_divers.o utils/list.o utils/bitstream.o utils/error.o utils/alloc.o utils/url.o utils/configfile.o 
+LIBGPAC_UTILS=utils/os_divers.o utils/os_file.o utils/list.o utils/bitstream.o utils/error.o utils/alloc.o utils/url.o utils/configfile.o 
 ifeq ($(DISABLE_CORE_TOOLS), no)
-LIBGPAC_UTILS+=utils/sha1.o  utils/base_encoding.o utils/os_net.o utils/os_thread.o utils/os_config_init.o utils/cache.o utils/downloader.o utils/xml_parser.o utils/utf.o utils/token.o 
+LIBGPAC_UTILS+=utils/sha1.o utils/base_encoding.o utils/math.o utils/os_net.o utils/os_thread.o utils/os_config_init.o utils/cache.o utils/downloader.o utils/xml_parser.o utils/utf.o utils/token.o utils/color.o 
 endif
 
 ifeq ($(DISABLE_PLAYER), no)
-LIBGPAC_UTILS+=utils/color.o utils/os_module.o utils/math.o utils/path2d.o utils/path2d_stroker.o utils/module.o utils/uni_bidi.o utils/ringbuffer.o utils/unicode.o
+LIBGPAC_UTILS+=utils/os_module.o utils/path2d.o utils/path2d_stroker.o utils/module.o utils/uni_bidi.o utils/ringbuffer.o utils/unicode.o utils/map.o 
 endif
 
 ## libgpac objects gathering: src/ietf
@@ -37,10 +37,17 @@ LIBGPAC_BIFS=bifs/arith_decoder.o bifs/bifs_codec.o bifs/bifs_node_tables.o bifs
 endif
 
 ## libgpac objects gathering: src/isomedia
-LIBGPAC_ISOM=isomedia/avc_ext.o isomedia/box_code_3gpp.o isomedia/box_code_apple.o isomedia/box_code_base.o isomedia/box_code_drm.o isomedia/box_code_meta.o isomedia/box_dump.o isomedia/box_funcs.o isomedia/data_map.o isomedia/drm_sample.o isomedia/isom_intern.o isomedia/isom_read.o isomedia/isom_store.o isomedia/isom_write.o isomedia/media.o isomedia/media_odf.o isomedia/meta.o isomedia/movie_fragments.o isomedia/sample_descs.o isomedia/stbl_read.o isomedia/stbl_write.o isomedia/track.o isomedia/tx3g.o isomedia/generic_subtitle.o 
+LIBGPAC_ISOM=isomedia/avc_ext.o isomedia/box_code_3gpp.o isomedia/box_code_apple.o isomedia/box_code_base.o isomedia/box_code_drm.o isomedia/box_code_meta.o isomedia/box_dump.o isomedia/box_funcs.o isomedia/data_map.o isomedia/drm_sample.o isomedia/isom_intern.o isomedia/isom_read.o isomedia/isom_store.o isomedia/isom_write.o isomedia/media.o isomedia/media_odf.o isomedia/meta.o isomedia/movie_fragments.o isomedia/sample_descs.o isomedia/stbl_read.o isomedia/stbl_write.o isomedia/track.o isomedia/tx3g.o isomedia/iff.o   
 ifeq ($(DISABLE_ISOFF_HINT), no)
 LIBGPAC_ISOM+=isomedia/hint_track.o isomedia/hinting.o
 endif
+ifeq ($(DISABLE_ISOM_ADOBE), no)
+LIBGPAC_ISOM+=isomedia/box_code_adobe.o
+endif
+ifeq ($(DISABLE_TTML), no)
+LIBGPAC_ISOM+=isomedia/ttml.o
+endif
+
 
 ## libgpac objects gathering: src/odf
 LIBGPAC_ODF=odf/desc_private.o odf/descriptors.o odf/odf_code.o odf/odf_codec.o odf/odf_command.o odf/qos.o odf/slc.o 
@@ -65,16 +72,17 @@ LIBGPAC_ODF+=odf/odf_parse.o
 endif
 
 ## libgpac objects gathering: src/scenegraph
-LIBGPAC_SCENE=scenegraph/base_scenegraph.o scenegraph/mpeg4_animators.o scenegraph/commands.o scenegraph/mpeg4_nodes.o scenegraph/mpeg4_valuator.o scenegraph/vrml_interpolators.o scenegraph/vrml_proto.o scenegraph/vrml_route.o scenegraph/vrml_script.o scenegraph/vrml_smjs.o scenegraph/vrml_tools.o scenegraph/x3d_nodes.o scenegraph/svg_attributes.o scenegraph/svg_types.o scenegraph/svg_smjs.o scenegraph/smil_anim.o scenegraph/smil_timing.o scenegraph/svg_properties.o scenegraph/dom_events.o  scenegraph/dom_smjs.o scenegraph/xbl_process.o scenegraph/xml_ns.o
+LIBGPAC_SCENE=scenegraph/base_scenegraph.o scenegraph/mpeg4_animators.o scenegraph/commands.o scenegraph/mpeg4_nodes.o scenegraph/mpeg4_valuator.o scenegraph/vrml_interpolators.o scenegraph/vrml_proto.o scenegraph/vrml_route.o scenegraph/vrml_script.o scenegraph/vrml_smjs.o scenegraph/vrml_tools.o scenegraph/x3d_nodes.o scenegraph/svg_attributes.o scenegraph/svg_types.o scenegraph/svg_smjs.o scenegraph/smil_anim.o scenegraph/smil_timing.o scenegraph/svg_properties.o scenegraph/dom_events.o  scenegraph/dom_smjs.o scenegraph/xbl_process.o scenegraph/xml_ns.o scenegraph/html5_media_smjs.o scenegraph/html5_mse_smjs.o scenegraph/webvtt_smjs.o
 
-## libgpac objects gathering: src/mcrypt
-LIBGPAC_MCRYPT=
-ifeq ($(DISABLE_MCRYPT), no)
-LIBGPAC_MCRYPT+=mcrypt/cbc.o mcrypt/cfb.o mcrypt/ctr.o mcrypt/des.o mcrypt/ecb.o mcrypt/g_crypt.o mcrypt/ncfb.o mcrypt/nofb.o mcrypt/ofb.o mcrypt/rijndael-128.o mcrypt/rijndael-192.o mcrypt/rijndael-256.o mcrypt/stream.o mcrypt/tripledes.o 
+## libgpac objects gathering: src/crypto
+LIBGPAC_CRYPTO=
+ifeq ($(DISABLE_CRYPTO), no)
+LIBGPAC_CRYPTO+=crypto/g_crypt.o crypto/g_crypt_openssl.o crypto/g_crypt_tinyaes.o crypto/tiny_aes.o
 endif
 
 ## libgpac objects gathering: src/media tools
-LIBGPAC_MEDIATOOLS=media_tools/isom_tools.o media_tools/av_parsers.o
+LIBGPAC_MEDIATOOLS=media_tools/isom_tools.o media_tools/dash_segmenter.o media_tools/av_parsers.o media_tools/atsc_dmx.o
+
 ifeq ($(DISABLE_AV_PARSERS), no)
 LIBGPAC_MEDIATOOLS+=media_tools/img.o
 endif
@@ -88,7 +96,7 @@ ifeq ($(DISABLE_MPD), no)
 LIBGPAC_MEDIATOOLS+=media_tools/m3u8.o media_tools/mpd.o
 endif
 ifeq ($(DISABLE_DASH_CLIENT), no)
-LIBGPAC_MEDIATOOLS+=media_tools/dash_client.o
+LIBGPAC_MEDIATOOLS+=media_tools/dash_client.o 
 endif
 ifeq ($(DISABLE_MEDIA_EXPORT), no)
 LIBGPAC_MEDIATOOLS+=media_tools/media_export.o
@@ -111,7 +119,7 @@ endif
 ifeq ($(DISABLE_OGG), no)
 LIBGPAC_MEDIATOOLS+=media_tools/gpac_ogg.o
 endif
-ifeq ($(DISABLE_MCRYPT), no)
+ifeq ($(DISABLE_CRYPTO), no)
 LIBGPAC_MEDIATOOLS+=media_tools/ismacryp.o
 endif
 ifeq ($(DISABLE_ISOFF_HINT), no)
@@ -130,6 +138,12 @@ endif
 ifeq ($(DISABLE_TTXT), no)
 LIBGPAC_MEDIATOOLS+=media_tools/text_import.o
 endif
+
+ifeq ($(DISABLE_PLAYER), no)
+LIBGPAC_MEDIATOOLS+=media_tools/html5_media.o media_tools/html5_mse.o
+endif
+
+LIBGPAC_MEDIATOOLS+=media_tools/webvtt.o
 
 
 ## libgpac objects gathering: src/scene_manager
@@ -153,7 +167,7 @@ ifeq ($(DISABLE_SVG), no)
 LIBGPAC_SCENEMANAGER+=scene_manager/loader_svg.o 
 endif
 ifeq ($(DISABLE_LOADER_SWF), no)
-LIBGPAC_SCENEMANAGER+=scene_manager/swf_parse.o scene_manager/swf_bifs.o 
+LIBGPAC_SCENEMANAGER+=scene_manager/swf_parse.o scene_manager/swf_bifs.o scene_manager/swf_svg.o 
 endif
 ifeq ($(DISABLE_SCENE_DUMP), no)
 LIBGPAC_SCENEMANAGER+=scene_manager/scene_dump.o
@@ -190,117 +204,24 @@ ifeq ($(DISABLE_LASER), no)
 LIBGPAC_LASER=laser/lsr_enc.o laser/lsr_dec.o laser/lsr_tables.o
 endif
 
-## libgpac objects gathering: la totale ...
-OBJS=$(LIBGPAC_UTILS) $(LIBGPAC_MCRYPT) $(LIBGPAC_SCENE) $(LIBGPAC_IETF) $(LIBGPAC_BIFS) $(LIBGPAC_ISOM) $(LIBGPAC_ODF) $(LIBGPAC_MEDIATOOLS) $(LIBGPAC_SCENEMANAGER) $(LIBGPAC_TERMINAL) $(LIBGPAC_COMPOSITOR) $(LIBGPAC_LASER)
+## libgpac objects gathering: 
+OBJS=$(LIBGPAC_UTILS) $(LIBGPAC_CRYPTO) $(LIBGPAC_SCENE) $(LIBGPAC_IETF) $(LIBGPAC_BIFS) $(LIBGPAC_ISOM) $(LIBGPAC_ODF) $(LIBGPAC_MEDIATOOLS) $(LIBGPAC_SCENEMANAGER) $(LIBGPAC_TERMINAL) $(LIBGPAC_COMPOSITOR) $(LIBGPAC_LASER)
 
-NEED_LOCAL_LIB="no"
-LINKLIBS=
 SCENEGRAPH_CFLAGS=
-MEDIATOOLS_CFLAGS=
+MEDIATOOLS_CFLAGS=$(JS_FLAGS)
 
-ifeq ($(DISABLE_CORE_TOOLS), no)
+##include static modules and other deps for libgpac
+include ../static.mak
 
-#1 - zlib support
-ifeq ($(CONFIG_ZLIB), local)
-CFLAGS+= -I"$(LOCAL_INC_PATH)/zlib"
-NEED_LOCAL_LIB="yes"
-endif
-LINKLIBS+=-lz
-
-#2 - ssl support
-ifeq ($(HAS_OPENSSL), yes)
-LINKLIBS+=$(SSL_LIBS)
-endif
-
-#3 - spidermonkey support
-ifeq ($(CONFIG_JS),no)
-else
-SCENEGRAPH_CFLAGS+=$(JS_FLAGS)
-ifeq ($(CONFIG_JS),local)
-NEED_LOCAL_LIB="yes"
-endif
-LINKLIBS+=$(JS_LIBS)
-endif
-
-endif
-
-#4 - JPEG support
-ifeq ($(CONFIG_JPEG), no)
-else
-LINKLIBS+= -ljpeg
-#local lib
-ifeq ($(CONFIG_JPEG), local)
-NEED_LOCAL_LIB="yes"
-MEDIATOOLS_CFLAGS+=-I"$(LOCAL_INC_PATH)/jpeg"
-endif
-endif
-
-
-#5 - PNG support
-ifeq ($(CONFIG_PNG), no)
-else
-LINKLIBS+= -lpng
-ifeq ($(CONFIG_PNG), local)
-NEED_LOCAL_LIB="yes"
-MEDIATOOLS_CFLAGS+=-I"$(LOCAL_INC_PATH)/png"
-endif
-endif
-
-
-## libgpac compositor compilation options
-COMPOSITOR_CFLAGS=
-
-## Add prefix before every lib
-ifneq ($(prefix), /usr/local)
-EXTRALIBS+=-L$(prefix)/lib
-else
-ifneq ($(prefix), /usr)
-EXTRALIBS+=-L$(prefix)/lib
-endif
-endif
-
-## OpenGL available
-ifeq ($(HAS_OPENGL),yes)
-EXTRALIBS+= $(OGL_LIBS)
-COMPOSITOR_CFLAGS+=$(OGL_INCLS)
-endif
-
-ifeq ($(NEED_LOCAL_LIB), "yes")
-EXTRALIBS+=-L../extra_lib/lib/gcc
-endif
-EXTRALIBS+=$(LINKLIBS)
-
-ifeq ($(GPAC_USE_TINYGL), yes)
-COMPOSITOR_CFLAGS+=-I"$(SRC_PATH)/../TinyGL/include"
-else
-COMPOSITOR_CFLAGS+=-DGPAC_HAS_GLU
-endif
-
-ifeq ($(ENABLE_JOYSTICK), yes)
-COMPOSITOR_CFLAGS+=-DENABLE_JOYSTICK
-endif
-
-
-## libgpac media tools compilation options
-ifeq ($(GPACREADONLY), yes)
-MEDIATOOLS_CFLAGS=-DGPAC_READ_ONLY
-endif
-
-
-ifeq ($(GPAC_ENST), yes)
-OBJS+=$(LIBGPAC_ENST)
-EXTRALIBS+=-liconv
-MEDIATOOLS_CFLAGS+=-DGPAC_ENST_PRIVATE
-endif
 
 
 ##libgpac library output
-LIB=libgpac.$(DYN_LIB_SUFFIX)
+LIB=libgpac$(DYN_LIB_SUFFIX)
 ifeq ($(CONFIG_WIN32),yes)
-#LDFLAGS+=-export-symbols libgpac.def
+LDFLAGS+=-Wl,-out-implib=../bin/gcc/libgpac.dll.a
 else
 ifeq ($(CONFIG_DARWIN),yes)
-LDFLAGS+=-install_name $(prefix)/lib/$(LIB)
+LDFLAGS+=-dynamiclib -install_name $(prefix)/lib/$(LIB)
 endif
 EXTRALIBS+=$(GPAC_SH_FLAGS)
 endif
@@ -312,51 +233,77 @@ endif
 
 ifeq ($(CONFIG_SUNOS), yes)
 LD_SONAME="-Wl,-h,$(LIB)"
-LINKLIBS+= -lrt
+EXTRALIBS+= -lrt
 endif
+
 
 SRCS := $(OBJS:.o=.c) 
 
 all: lib
 
-lib: $(LIB)
+lib: ../bin/gcc/$(LIB)
 
 #there's a bunch of warnings in there, get rid of them
-mcrypt: CFLAGS= $(OPTFLAGS) -w -I"$(SRC_PATH)/include"
-mcrypt: $(LIBGPAC_MCRYPT)
+crypto: CFLAGS= $(OPTFLAGS) -w -I"$(SRC_PATH)/include"
+crypto: $(LIBGPAC_CRYPTO)
 
 scenegraph: CFLAGS += $(SCENEGRAPH_CFLAGS)
 scenegraph: $(LIBGPAC_SCENE)
+.deps/scenegraph/%: CFLAGS += $(SCENEGRAPH_CFLAGS)
+.deps/scenegraph/%: CFLAGS += $(SCENEGRAPH_CFLAGS)
 
-mediatools: CFLAGS += $(MEDIATOOLS_CFLAGS)
-mediatools: $(LIBGPAC_MEDIATOOLS)
+media_tools: CFLAGS += $(MEDIATOOLS_CFLAGS)
+media_tools: $(LIBGPAC_MEDIATOOLS)
+.deps/media_tools/%: CFLAGS += $(MEDIATOOLS_CFLAGS)
+.deps/media_tools/%: CFLAGS += $(MEDIATOOLS_CFLAGS)
 
 compositor: CFLAGS+=$(COMPOSITOR_CFLAGS)
 compositor: $(LIBGPAC_COMPOSITOR)
+.deps/compositor/%: CFLAGS += $(COMPOSITOR_CFLAGS)
+.deps/compositor/%: CFLAGS += $(COMPOSITOR_CFLAGS)
 
 
-$(LIB): $(LIBGPAC_UTILS) $(LIBGPAC_IETF) $(LIBGPAC_BIFS) $(LIBGPAC_ODF) $(LIBGPAC_LASER) $(LIBGPAC_ISOM) $(LIBGPAC_SCENEMANAGER) $(LIBGPAC_TERMINAL) compositor scenegraph mediatools mcrypt $(OBJS)
-	@echo "Linking libgpac"
+../bin/gcc/$(LIB): $(LIBGPAC_UTILS) $(LIBGPAC_IETF) $(LIBGPAC_BIFS) $(LIBGPAC_ODF) $(LIBGPAC_LASER) $(LIBGPAC_ISOM) $(LIBGPAC_SCENEMANAGER) $(LIBGPAC_TERMINAL) compositor scenegraph media_tools crypto $(OBJS)
+	@echo "OBJS $(OBJS)"
+	@echo "LIBS $(EXTRALIBS)"
+
 ifeq ($(CONFIG_DARWIN),yes)
+
 	$(LIBTOOL) -s -o ../bin/gcc/libgpac_static.a $(OBJS)
 	$(RANLIB) ../bin/gcc/libgpac_static.a
-	$(CC) $(SHFLAGS) $(LD_SONAME) $(LDFLAGS) -o ../bin/gcc/$@ $(OBJS) $(EXTRALIBS) 
+ifneq ($(STATICBUILD),yes)
+	$(CC) $(SHFLAGS) $(LD_SONAME) -o $@ $(OBJS) $(EXTRALIBS)  $(LDFLAGS)
+endif
+
 else
+
 	$(AR) cr ../bin/gcc/libgpac_static.a $(OBJS)
 	$(RANLIB) ../bin/gcc/libgpac_static.a
-	$(CC) $(SHFLAGS) $(LD_SONAME) $(LDFLAGS) -o ../bin/gcc/$@ $(OBJS) $(EXTRALIBS)
-ifeq (,$(findstring yes, $(CONFIG_WIN32)))
-	mv ../bin/gcc/$@ ../bin/gcc/$@.$(VERSION_SONAME)
-	ln -sf $@.$(VERSION_SONAME) ../bin/gcc/$@.$(VERSION_MAJOR)
-	ln -sf $@.$(VERSION_SONAME) ../bin/gcc/$@
-endif
+ifneq ($(STATICBUILD),yes)
+	$(CC) $(SHFLAGS) $(LD_SONAME) -o $@ $(OBJS) $(EXTRALIBS)	 $(LDFLAGS)
+	mv $@ $@.$(VERSION_SONAME)
+	ln -sf $(notdir $@).$(VERSION_SONAME) $@.$(VERSION_MAJOR)
+	ln -sf $(notdir $@).$(VERSION_SONAME) $@
 endif
 
-dep: depend
+endif
 
-depend:
-	rm -f .depend
-	$(CC) -MM $(CFLAGS) $(SRCS) 1>.depend
+ifeq ($(shell fgrep "Libs.private:" ../gpac.pc 1>&2 2> /dev/null ; echo $$?), 1)
+	@echo "Libs.private: -lgpac_static $(EXTRALIBS)" >> ../gpac.pc
+endif
+
+dep:
+
+DEPS := $(SRCS:%.c=.deps/%.dep)
+
+-include .depend
+
+.depend: $(DEPS)
+	cat $^ > "$@"
+
+.deps/%.dep: %.c
+	@mkdir -p $(dir $@)
+	$(CC) -MM $(CFLAGS) "$<" -MT "$*.o" -MF "$@"
 
 clean: 
 	rm -f $(OBJS) ../bin/gcc/$(LIB)
@@ -365,11 +312,4 @@ clean:
 		../bin/gcc/libgpac.so.$(VERSION_SONAME)
 
 distclean: clean
-	rm -f Makefile.bak .depend
-
-
-# include dependency files if they exist
-#
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+	rm -f Makefile.bak .depend $(DEPS)

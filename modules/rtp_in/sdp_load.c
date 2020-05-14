@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,16 +11,16 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
- *		
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
  */
 
 #include "rtp_in.h"
@@ -56,6 +56,8 @@ GF_Err RP_SetupSDP(RTPClient *rtp, GF_SDPInfo *sdp, RTPStream *stream)
 		/*session migration*/
 		else if (!strcmp(att->Name, "x-session-name")) url = att->Value;
 		else if (!strcmp(att->Name, "x-session-id")) session_id = att->Value;
+		/*we have the H264-SVC streams*/
+		else if (!strcmp(att->Name, "group") && !strncmp(att->Value, "DDP", 3)) rtp->is_scalable = GF_TRUE;
 	}
 	if (range) {
 		Start = range->start;
@@ -92,7 +94,7 @@ GF_Err RP_SetupSDP(RTPClient *rtp, GF_SDPInfo *sdp, RTPStream *stream)
 			if (End > 0) ch->flags |= RTP_HAS_RANGE;
 		}
 
-		/*force interleaving whenever needed*/	
+		/*force interleaving whenever needed*/
 		if (ch->rtsp) {
 			switch (ch->depacketizer->sl_map.StreamType) {
 			case GF_STREAM_VISUAL:
@@ -110,7 +112,7 @@ GF_Err RP_SetupSDP(RTPClient *rtp, GF_SDPInfo *sdp, RTPStream *stream)
 				break;
 			}
 		}
-	
+
 	}
 	return GF_OK;
 }
@@ -131,7 +133,7 @@ GF_Err RP_SDPLoadIOD(RTPClient *rtp, char *iod_str)
 		buf64 = strstr(iod_str, ",");
 		if (!buf64) return GF_URL_ERROR;
 		buf64 += 1;
-		size64 = strlen(buf64) - 1;
+		size64 = (u32) strlen(buf64) - 1;
 
 		size = gf_base64_decode(buf64, size64, buf, 2000);
 		if (!size) return GF_SERVICE_ERROR;
@@ -142,7 +144,7 @@ GF_Err RP_SDPLoadIOD(RTPClient *rtp, char *iod_str)
 		buf16 = strstr(iod_str, ",");
 		if (!buf16) return GF_URL_ERROR;
 		buf16 += 1;
-		size16 = strlen(buf16) - 1;
+		size16 = (u32) strlen(buf16) - 1;
 
 		size = gf_base16_decode(buf16, size16, buf, 2000);
 		if (!size) return GF_SERVICE_ERROR;
@@ -158,27 +160,36 @@ GF_Err RP_SDPLoadIOD(RTPClient *rtp, char *iod_str)
 static u32 get_stream_type_from_hint(u32 ht)
 {
 	switch (ht) {
-	case GF_MEDIA_OBJECT_VIDEO: return GF_STREAM_VISUAL;
-	case GF_MEDIA_OBJECT_AUDIO: return GF_STREAM_AUDIO;
-	case GF_MEDIA_OBJECT_TEXT: return GF_STREAM_TEXT;
-	default: return 0;
+	case GF_MEDIA_OBJECT_VIDEO:
+		return GF_STREAM_VISUAL;
+	case GF_MEDIA_OBJECT_AUDIO:
+		return GF_STREAM_AUDIO;
+	case GF_MEDIA_OBJECT_TEXT:
+		return GF_STREAM_TEXT;
+	default:
+		return 0;
 	}
 }
 
-static GF_ObjectDescriptor *RP_GetChannelOD(RTPStream *ch, u32 ch_idx)
+static GF_ESD *RP_GetChannelESD(RTPStream *ch, u32 ch_idx)
 {
 	GF_ESD *esd;
-	GF_ObjectDescriptor *od = (GF_ObjectDescriptor *) gf_odf_desc_new(GF_ODF_OD_TAG);
 
 	if (!ch->ES_ID) ch->ES_ID = ch_idx + 1;
-	od->objectDescriptorID = ch->OD_ID ? ch->OD_ID : ch->ES_ID;
+	if (!ch->depacketizer) {
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_RTP, ("RTP Stream channel %u has no depacketizer\n", ch_idx));
+		return NULL;
+	}
 
 	esd = gf_odf_desc_esd_new(0);
 	esd->slConfig->timestampResolution = gf_rtp_get_clockrate(ch->rtp_ch);
 	esd->slConfig->useRandomAccessPointFlag = 1;
 	esd->slConfig->useTimestampsFlag = 1;
+	esd->slConfig->no_dts_signaling = ch->depacketizer->sl_map.DTSDeltaLength ? GF_FALSE : GF_TRUE;
 	esd->ESID = ch->ES_ID;
 	esd->OCRESID = 0;
+	if (ch->mid)
+		esd->has_scalable_layers = GF_TRUE;
 
 	esd->decoderConfig->streamType = ch->depacketizer->sl_map.StreamType;
 	esd->decoderConfig->objectTypeIndication = ch->depacketizer->sl_map.ObjectTypeIndication;
@@ -196,7 +207,39 @@ static GF_ObjectDescriptor *RP_GetChannelOD(RTPStream *ch, u32 ch_idx)
 		ch->depacketizer->sl_map.rvc_config = NULL;
 		ch->depacketizer->sl_map.rvc_config_size = 0;
 	}
+
+	return esd;
+}
+
+static GF_ObjectDescriptor *RP_GetChannelOD(RTPStream *ch, u32 ch_idx)
+{
+	GF_ESD *esd;
+	GF_ObjectDescriptor *od = (GF_ObjectDescriptor *) gf_odf_desc_new(GF_ODF_OD_TAG);
+
+	esd = RP_GetChannelESD(ch, ch_idx);
+
+	od->objectDescriptorID = ch->OD_ID ? ch->OD_ID : ch->ES_ID;
+
 	gf_list_add(od->ESDescriptors, esd);
+
+	// for each channel depending on this channel, get esd, set esd->dependsOnESID and add to od
+	if (ch->owner->is_scalable) {
+		u32 i, count;
+
+		count = gf_list_count(ch->owner->channels);
+		for (i = 0; i < count; i++) {
+			RTPStream *the_channel;
+			GF_ESD *the_esd;
+
+			the_channel = (RTPStream *)gf_list_get(ch->owner->channels, i);
+			if (the_channel->base_stream == ch->mid) {
+				the_esd = RP_GetChannelESD(the_channel, i);
+				the_esd->dependsOnESID = the_channel->prev_stream;
+				gf_list_add(od->ESDescriptors, the_esd);
+			}
+		}
+	}
+
 	return od;
 }
 
@@ -243,20 +286,21 @@ void RP_SetupObjects(RTPClient *rtp)
 	i=0;
 	while ((ch = (RTPStream *)gf_list_enum(rtp->channels, &i))) {
 		if (ch->control && !strnicmp(ch->control, "data:", 5)) continue;
+		if (ch->prev_stream) continue;
 
 		if (!rtp->media_type) {
 			od = RP_GetChannelOD(ch, i);
 			if (!od) continue;
-			gf_term_add_media(rtp->service, (GF_Descriptor*)od, 1);
+			gf_service_declare_media(rtp->service, (GF_Descriptor*)od, GF_TRUE);
 		} else if (rtp->media_type==ch->depacketizer->sl_map.StreamType) {
 			od = RP_GetChannelOD(ch, i);
 			if (!od) continue;
-			gf_term_add_media(rtp->service, (GF_Descriptor*)od, 1);
+			gf_service_declare_media(rtp->service, (GF_Descriptor*)od, GF_TRUE);
 			rtp->media_type = 0;
 			break;
 		}
 	}
-	gf_term_add_media(rtp->service, NULL, 0);
+	gf_service_declare_media(rtp->service, NULL, GF_FALSE);
 }
 
 void RP_LoadSDP(RTPClient *rtp, char *sdp_text, u32 sdp_len, RTPStream *stream)
@@ -268,7 +312,7 @@ void RP_LoadSDP(RTPClient *rtp, char *sdp_text, u32 sdp_len, RTPStream *stream)
 	char *iod_str;
 	GF_X_Attribute *att;
 
-	is_isma_1 = 0;
+	is_isma_1 = GF_FALSE;
 	iod_str = NULL;
 	sdp = gf_sdp_info_new();
 	e = gf_sdp_info_parse(sdp, sdp_text, sdp_len);
@@ -276,21 +320,21 @@ void RP_LoadSDP(RTPClient *rtp, char *sdp_text, u32 sdp_len, RTPStream *stream)
 	if (e == GF_OK) e = RP_SetupSDP(rtp, sdp, stream);
 
 	/*root SDP, attach service*/
-	if (! stream) {
+	if (!stream) {
 		/*look for IOD*/
 		if (e==GF_OK) {
 			i=0;
 			while ((att = (GF_X_Attribute*)gf_list_enum(sdp->Attributes, &i))) {
 				if (!iod_str && !strcmp(att->Name, "mpeg4-iod") ) iod_str = att->Value;
 				if (!is_isma_1 && !strcmp(att->Name, "isma-compliance") ) {
-					if (!stricmp(att->Value, "1,1.0,1")) is_isma_1 = 1;
+					if (!stricmp(att->Value, "1,1.0,1")) is_isma_1 = GF_TRUE;
 				}
 			}
 
 			/*force iod reconstruction with ISMA to use proper clock dependencies*/
 			if (is_isma_1) iod_str = NULL;
 
-			/*some folks have weird notions of MPEG-4 systems, they use hardcoded IOD 
+			/*some folks have weird notions of MPEG-4 systems, they use hardcoded IOD
 			with AAC ESD even when streaming AMR...*/
 			if (iod_str) {
 				RTPStream *ch;
@@ -301,16 +345,16 @@ void RP_LoadSDP(RTPClient *rtp, char *sdp_text, u32 sdp_len, RTPStream *stream)
 						break;
 					}
 				}
-			} 
+			}
 			if (!iod_str) {
 				RTPStream *ch;
-				Bool needs_iod = 0;
+				Bool needs_iod = GF_FALSE;
 				i=0;
 				while ((ch = (RTPStream *)gf_list_enum(rtp->channels, &i))) {
-					if ((ch->depacketizer->payt==GF_RTP_PAYT_MPEG4) && (ch->depacketizer->sl_map.StreamType==GF_STREAM_SCENE) 
+					if (ch->depacketizer && (ch->depacketizer->payt==GF_RTP_PAYT_MPEG4) && (ch->depacketizer->sl_map.StreamType==GF_STREAM_SCENE)
 //						|| ((ch->depacketizer->payt==GF_RTP_PAYT_3GPP_DIMS) && (ch->depacketizer->sl_map.StreamType==GF_STREAM_SCENE))
-						) {
-						needs_iod = 1;
+					   ) {
+						needs_iod = GF_TRUE;
 						break;
 					}
 				}
@@ -318,19 +362,19 @@ void RP_LoadSDP(RTPClient *rtp, char *sdp_text, u32 sdp_len, RTPStream *stream)
 					rtp->session_desc = (GF_Descriptor *)RP_GetChannelOD(ch, 0);
 				}
 			}
-			
+
 			if (iod_str) e = RP_SDPLoadIOD(rtp, iod_str);
 		}
 		/*attach service*/
-		has_iod = rtp->session_desc ? 1 : 0;
-		gf_term_on_connect(rtp->service, NULL, e);
+		has_iod = rtp->session_desc ? GF_TRUE : GF_FALSE;
+		gf_service_connect_ack(rtp->service, NULL, e);
 		if (!e && !has_iod && !rtp->media_type) RP_SetupObjects(rtp);
 		rtp->media_type = 0;
 	}
 	/*channel SDP */
 	else {
 		if (e) {
-			gf_term_on_connect(rtp->service, stream->channel, e);
+			gf_service_connect_ack(rtp->service, stream->channel, e);
 			stream->status = RTP_Unavailable;
 		} else {
 			/*connect*/
@@ -342,7 +386,7 @@ void RP_LoadSDP(RTPClient *rtp, char *sdp_text, u32 sdp_len, RTPStream *stream)
 		char *buf=NULL;
 		gf_sdp_info_write(sdp, &buf);
 		if (buf) {
-			rtp->session_state_data = gf_malloc(sizeof(char) * (strlen("data:application/sdp,") + strlen(buf) + 1) );
+			rtp->session_state_data = (char*)gf_malloc(sizeof(char) * (strlen("data:application/sdp,") + strlen(buf) + 1) );
 			strcpy(rtp->session_state_data, "data:application/sdp,");
 			strcat(rtp->session_state_data, buf);
 			gf_free(buf);
@@ -368,7 +412,9 @@ void MigrateSDP_NetIO(void *cbk, GF_NETIO_Parameter *param)
 
 	case GF_NETIO_GET_CONTENT:
 		param->data = rtp->session_state_data + strlen("data:application/sdp,");
-		param->size = strlen(param->data);
+		param->size = (u32) strlen(param->data);
+		return;
+	default:
 		return;
 	}
 }
@@ -388,11 +434,11 @@ void RP_SaveSessionState(RTPClient *rtp)
 
 	sdp_buf = rtp->session_state_data + strlen("data:application/sdp,");
 	sdp = gf_sdp_info_new();
-	e = gf_sdp_info_parse(sdp, sdp_buf, strlen(sdp_buf) );
+	e = gf_sdp_info_parse(sdp, sdp_buf, (u32) strlen(sdp_buf) );
 
 	for (i=0; i<gf_list_count(rtp->channels); i++) {
 		GF_SDPMedia *media = NULL;
-		RTPStream *ch = gf_list_get(rtp->channels, i);
+		RTPStream *ch = (RTPStream*)gf_list_get(rtp->channels, i);
 		if (!ch->control) continue;
 
 		for (j=0; j<gf_list_count(sdp->media_desc); j++) {
@@ -429,18 +475,22 @@ void RP_SaveSessionState(RTPClient *rtp)
 			ch->current_start += gf_rtp_get_current_time(ch->rtp_ch);
 
 			GF_SAFEALLOC(att, GF_X_Attribute);
+			if (!att) {
+				GF_LOG(GF_LOG_WARNING, GF_LOG_RTP, ("[RTP] Failed to save stream state for channel\n"));
+				continue;
+			}
 			att->Name = gf_strdup("x-stream-state");
 			porta = ch->rtp_ch->net_info.port_first ? ch->rtp_ch->net_info.port_first : ch->rtp_ch->net_info.client_port_first;
 			portb = ch->rtp_ch->net_info.port_last ? ch->rtp_ch->net_info.port_last : ch->rtp_ch->net_info.client_port_last;
 
-			sprintf(szPorts, "server-port=%d-%d;ssrc=%X;npt=%g;seq=%d;rtptime=%d", 
-				porta, 
-				portb,
-				ch->rtp_ch->SenderSSRC,
-				ch->current_start,
-				ch->rtp_ch->rtp_first_SN,
-				ch->rtp_ch->rtp_time
-			);
+			sprintf(szPorts, "server-port=%d-%d;ssrc=%X;npt=%g;seq=%d;rtptime=%d",
+			        porta,
+			        portb,
+			        ch->rtp_ch->SenderSSRC,
+			        ch->current_start,
+			        ch->rtp_ch->rtp_first_SN,
+			        ch->rtp_ch->rtp_time
+			       );
 			att->Value = gf_strdup(szPorts);
 			gf_list_add(media->Attributes, att);
 
@@ -455,7 +505,7 @@ void RP_SaveSessionState(RTPClient *rtp)
 	for (j=0; j<gf_list_count(sdp->Attributes); j++) {
 		att = (GF_X_Attribute*)gf_list_get(sdp->Attributes, j);
 		if (!stricmp(att->Name, "x-session-id") || !stricmp(att->Name, "x-session-name")
-		) {
+		   ) {
 			gf_free(att->Name);
 			gf_free(att->Value);
 			gf_free(att);
@@ -467,23 +517,31 @@ void RP_SaveSessionState(RTPClient *rtp)
 
 		if (sess->session_id) {
 			GF_SAFEALLOC(att, GF_X_Attribute);
-			att->Name = gf_strdup("x-session-id");
-			att->Value = gf_strdup(sess->session_id);
-			gf_list_add(sdp->Attributes, att);
+			if (!att) {
+				GF_LOG(GF_LOG_WARNING, GF_LOG_RTP, ("[RTP] Failed to save session ID\n"));
+			} else {
+				att->Name = gf_strdup("x-session-id");
+				att->Value = gf_strdup(sess->session_id);
+				gf_list_add(sdp->Attributes, att);
+			}
 		}
 
 		GF_SAFEALLOC(att, GF_X_Attribute);
-		att->Name = gf_strdup("x-session-name");
-		sprintf(szURL, "rtsp://%s:%d/%s", sess->session->Server, sess->session->Port, sess->session->Service);
-		att->Value = gf_strdup(szURL);
-		gf_list_add(sdp->Attributes, att);
+		if (!att) {
+			GF_LOG(GF_LOG_WARNING, GF_LOG_RTP, ("[RTP] Failed to save session name\n"));
+		} else {
+			att->Name = gf_strdup("x-session-name");
+			sprintf(szURL, "rtsp://%s:%d/%s", sess->session->Server, sess->session->Port, sess->session->Service);
+			att->Value = gf_strdup(szURL);
+			gf_list_add(sdp->Attributes, att);
+		}
 	}
 
 	gf_free(rtp->session_state_data);
 	sdp_buf = NULL;
 	gf_sdp_info_write(sdp, &sdp_buf);
 	if (sdp_buf) {
-		rtp->session_state_data = gf_malloc(sizeof(char) * (strlen("data:application/sdp,") + strlen(sdp_buf) + 1) );
+		rtp->session_state_data = (char*)gf_malloc(sizeof(char) * (strlen("data:application/sdp,") + strlen(sdp_buf) + 1) );
 		strcpy(rtp->session_state_data, "data:application/sdp,");
 		strcat(rtp->session_state_data, sdp_buf);
 		gf_free(sdp_buf);
@@ -493,33 +551,33 @@ void RP_SaveSessionState(RTPClient *rtp)
 	gf_sdp_info_del(sdp);
 
 
-	opt = (char *) gf_modules_get_option((GF_BaseInterface *) gf_term_get_service_interface(rtp->service), "Streaming", "SessionMigrationServer");
+	opt = (char *) gf_modules_get_option((GF_BaseInterface *) gf_service_get_interface(rtp->service), "Streaming", "SessionMigrationServer");
 	if (opt) {
-		if (rtp->dnload) gf_term_download_del(rtp->dnload);
+		if (rtp->dnload) gf_service_download_del(rtp->dnload);
 		rtp->dnload = NULL;
 
 		if (strnicmp(opt, "http://", 7)) {
-			rtp->dnload = gf_term_download_new(rtp->service, opt, GF_NETIO_SESSION_NOT_THREADED, MigrateSDP_NetIO, rtp);
+			rtp->dnload = gf_service_download_new(rtp->service, opt, GF_NETIO_SESSION_NOT_THREADED, MigrateSDP_NetIO, rtp);
 			while (1) {
 				char buffer[100];
 				u32 read;
 				e = gf_dm_sess_fetch_data(rtp->dnload, buffer, 100, &read);
 				if (e && (e!=GF_IP_NETWORK_EMPTY)) break;
 			}
-			gf_term_download_del(rtp->dnload);
+			gf_service_download_del(rtp->dnload);
 			rtp->dnload = NULL;
 		} else {
-			FILE *f = gf_f64_open(opt, "wt");
+			FILE *f = gf_fopen(opt, "wt");
 			if (f) {
 				sdp_buf = rtp->session_state_data + strlen("data:application/sdp,");
 				gf_fwrite(sdp_buf, 1, strlen(sdp_buf), f);
-				fclose(f);
+				gf_fclose(f);
 			} else {
 				e = GF_IO_ERR;
 			}
 		}
-		if (e<0) {
-			gf_term_on_message(sess->owner->service, e, "Error saving session state");
+		if (sess && sess->owner && (e<0)) {
+			RP_SendMessage(sess->owner->service, e, "Error saving session state");
 		}
 	}
 }

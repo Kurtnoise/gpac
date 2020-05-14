@@ -1,5 +1,5 @@
 LOCAL_PATH:= $(call my-dir)
-APP_ABI          := armeabi armeabi-v7a
+APP_ABI          := armeabi armeabi-v7a x86
 
 include $(CLEAR_VARS)
 include $(LOCAL_PATH)/../common.mk
@@ -16,10 +16,11 @@ LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/include/jpeg/
 LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/include/png/
 LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/include/faad
 LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/include/js/
+LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/include/openjpeg
 LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../modules
 
 LOCAL_LDLIBS    += -L$(LOCAL_PATH)/../../../../extra_lib/lib/android/$(TARGET_ARCH_ABI)
-LOCAL_LDLIBS    += -lGLESv1_CM -ldl
+LOCAL_LDLIBS    += -lGLESv2 -ldl
 LOCAL_LDLIBS    += -ljs_osmo -leditline -lft2 -ljpegdroid -lopenjpeg -lpng -lz
 #LOCAL_EXPORT_LDLIBS= -ljs_osmo -leditline -lft2 -ljpeg -lopenjpeg -lpng -lz
 
@@ -91,13 +92,16 @@ LOCAL_SRC_FILES := \
 	../../../../src/compositor/svg_text.c \
 	../../../../src/compositor/hc_flash_shape.c \
 	../../../../src/compositor/svg_filters.c \
+	../../../../src/media_tools/atsc_dmx.c \
 	../../../../src/media_tools/avilib.c \
 	../../../../src/media_tools/filestreamer.c \
 	../../../../src/media_tools/isom_tools.c \
+	../../../../src/media_tools/dash_segmenter.c \
 	../../../../src/media_tools/mpeg2_ps.c \
 	../../../../src/media_tools/vobsub.c \
 	../../../../src/media_tools/media_import.c \
 	../../../../src/media_tools/text_import.c \
+	../../../../src/media_tools/webvtt.c \
 	../../../../src/media_tools/ismacryp.c \
 	../../../../src/media_tools/img.c \
 	../../../../src/media_tools/mpegts.c \
@@ -114,6 +118,8 @@ LOCAL_SRC_FILES := \
 	../../../../src/media_tools/m3u8.c \
 	../../../../src/media_tools/ait.c \
 	../../../../src/media_tools/dsmcc.c \
+	../../../../src/media_tools/html5_media.c \
+	../../../../src/media_tools/html5_mse.c \
 	../../../../src/laser/lsr_tables.c \
 	../../../../src/laser/lsr_dec.c \
 	../../../../src/laser/lsr_enc.c \
@@ -128,6 +134,7 @@ LOCAL_SRC_FILES := \
 	../../../../src/scene_manager/text_to_bifs.c \
 	../../../../src/scene_manager/loader_isom.c \
 	../../../../src/scene_manager/swf_bifs.c \
+	../../../../src/scene_manager/swf_svg.c \
 	../../../../src/scene_manager/loader_xmt.c \
 	../../../../src/scene_manager/loader_svg.c \
 	../../../../src/utils/alloc.c \
@@ -135,6 +142,7 @@ LOCAL_SRC_FILES := \
 	../../../../src/utils/path2d_stroker.c \
 	../../../../src/utils/zutil.c \
 	../../../../src/utils/os_divers.c \
+	../../../../src/utils/os_file.c \
 	../../../../src/utils/path2d.c \
 	../../../../src/utils/base_encoding.c \
 	../../../../src/utils/module.c \
@@ -151,6 +159,7 @@ LOCAL_SRC_FILES := \
 	../../../../src/utils/color.c \
 	../../../../src/utils/token.c \
 	../../../../src/utils/configfile.c \
+	../../../../src/utils/os_config_init.c \
 	../../../../src/utils/utf.c \
 	../../../../src/utils/os_thread.c \
 	../../../../src/utils/cache.c \
@@ -190,6 +199,7 @@ LOCAL_SRC_FILES := \
 	../../../../src/isomedia/isom_read.c \
 	../../../../src/isomedia/box_code_meta.c \
 	../../../../src/isomedia/box_code_base.c \
+	../../../../src/isomedia/box_code_adobe.c \
 	../../../../src/isomedia/box_code_apple.c \
 	../../../../src/isomedia/sample_descs.c \
 	../../../../src/isomedia/meta.c \
@@ -198,7 +208,8 @@ LOCAL_SRC_FILES := \
 	../../../../src/isomedia/isom_intern.c \
 	../../../../src/isomedia/isom_write.c \
 	../../../../src/isomedia/drm_sample.c \
-	../../../../src/isomedia/generic_subtitle.c \
+	../../../../src/isomedia/iff.c \
+	../../../../src/isomedia/ttml.c \
 	../../../../src/isomedia/tx3g.c \
 	../../../../src/isomedia/hint_track.c \
 	../../../../src/isomedia/stbl_write.c \
@@ -208,20 +219,10 @@ LOCAL_SRC_FILES := \
 	../../../../src/isomedia/isom_store.c \
 	../../../../src/isomedia/movie_fragments.c \
 	../../../../src/isomedia/media_odf.c \
-	../../../../src/mcrypt/ofb.c \
-	../../../../src/mcrypt/tripledes.c \
-	../../../../src/mcrypt/cfb.c \
-	../../../../src/mcrypt/stream.c \
-	../../../../src/mcrypt/rijndael-256.c \
-	../../../../src/mcrypt/ncfb.c \
-	../../../../src/mcrypt/rijndael-192.c \
-	../../../../src/mcrypt/ctr.c \
-	../../../../src/mcrypt/nofb.c \
-	../../../../src/mcrypt/des.c \
-	../../../../src/mcrypt/g_crypt.c \
-	../../../../src/mcrypt/ecb.c \
-	../../../../src/mcrypt/cbc.c \
-	../../../../src/mcrypt/rijndael-128.c \
+	../../../../src/crypto/g_crypt.c \
+	../../../../src/crypto/g_crypt_openssl.c \
+	../../../../src/crypto/g_crypt_tinyaes.c \
+	../../../../src/crypto/tiny_aes.c \
 	../../../../src/terminal/scene.c \
 	../../../../src/terminal/terminal.c \
 	../../../../src/terminal/network_service.c \
@@ -261,6 +262,8 @@ LOCAL_SRC_FILES := \
 	../../../../src/scenegraph/smil_timing.c \
 	../../../../src/scenegraph/vrml_script.c \
 	../../../../src/scenegraph/vrml_proto.c \
+	../../../../src/scenegraph/html5_media_smjs.c \
+	../../../../src/scenegraph/html5_mse_smjs.c \
 	../../../../src/odf/ipmpx_dump.c \
 	../../../../src/odf/odf_code.c \
 	../../../../src/odf/desc_private.c \

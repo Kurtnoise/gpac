@@ -17,8 +17,8 @@ static TCHAR w_current_dir[GF_MAX_PATH] = _T("\\");
 static u8 current_dir[GF_MAX_PATH] = "\\";
 static const char *extension_list = NULL;
 static char *out_url = NULL;
-Bool bViewUnknownTypes = 0;
-Bool playlist_mode = 0;
+Bool bViewUnknownTypes = GF_FALSE;
+Bool playlist_mode = GF_FALSE;
 GF_Config *cfg;
 
 
@@ -40,7 +40,7 @@ static void switch_menu_pl()
 	DeleteMenu(g_hMenuView, IDM_OF_PL_UP, MF_BYCOMMAND);
 	DeleteMenu(g_hMenuView, IDM_OF_PL_DOWN, MF_BYCOMMAND);
 	DeleteMenu(g_hMenuView, IDM_OF_PL_CLEAR, MF_BYCOMMAND);
-	
+
 	if (playlist_mode) {
 		InsertMenu(g_hMenuView, 0, MF_BYPOSITION, IDM_OF_PL_CLEAR, _T("Clear"));
 		InsertMenu(g_hMenuView, 0, MF_BYPOSITION, IDM_OF_PL_DOWN, _T("Move Down") );
@@ -48,38 +48,38 @@ static void switch_menu_pl()
 	} else {
 		InsertMenu(g_hMenuView, 0, MF_BYPOSITION, IDM_OF_VIEW_ALL, _T("All Unknown Files") );
 	}
-	TBBUTTONINFO tbbi; 
-	tbbi.cbSize = sizeof(tbbi); 
-	tbbi.dwMask = TBIF_TEXT; 
-	tbbi.pszText = playlist_mode ? _T("Remove") : _T("Add"); 
-	SendMessage(g_hWndMenuBar, TB_SETBUTTONINFO, IDM_OF_PL_ACT, (LPARAM)&tbbi); 
+	TBBUTTONINFO tbbi;
+	tbbi.cbSize = sizeof(tbbi);
+	tbbi.dwMask = TBIF_TEXT;
+	tbbi.pszText = playlist_mode ? _T("Remove") : _T("Add");
+	SendMessage(g_hWndMenuBar, TB_SETBUTTONINFO, IDM_OF_PL_ACT, (LPARAM)&tbbi);
 	refresh_menu_states();
 }
 
 
-Bool enum_dirs(void *cbk, char *name, char *path)
+Bool enum_dirs(void *cbk, char *name, char *path, GF_FileEnumInfo *file_info)
 {
 	TCHAR w_name[GF_MAX_PATH], w_str_name[GF_MAX_PATH];
 
 	CE_CharToWide(name, (u16 *) w_name);
 	wcscpy(w_str_name, _T("+ "));
 	wcscat(w_str_name, w_name);
-    int iRes = SendMessage(hList, LB_ADDSTRING, 0, (LPARAM)(LPCTSTR) w_str_name);
+	int iRes = SendMessage(hList, LB_ADDSTRING, 0, (LPARAM)(LPCTSTR) w_str_name);
 	SendMessage(hList, LB_SETITEMDATA, iRes, (LPARAM) 1);
-	return 0;
+	return GF_FALSE;
 }
 
-Bool enum_files(void *cbk, char *name, char *path)
+Bool enum_files(void *cbk, char *name, char *path, GF_FileEnumInfo *file_info)
 {
 	TCHAR w_name[GF_MAX_PATH];
 
 	if (!bViewUnknownTypes && extension_list) {
 		char *ext = strrchr(name, '.');
-		if (!ext || !strstr(extension_list, ext+1)) return 0;
+		if (!ext || !strstr(extension_list, ext+1)) return GF_FALSE;
 	}
 	CE_CharToWide(name, (u16 *) w_name);
-    SendMessage(hList, LB_ADDSTRING, 0, (LPARAM)(LPCTSTR) w_name);
-	return 0;
+	SendMessage(hList, LB_ADDSTRING, 0, (LPARAM)(LPCTSTR) w_name);
+	return GF_FALSE;
 }
 
 
@@ -97,10 +97,10 @@ void set_directory(TCHAR *dir)
 	}
 
 	/*enum directories*/
-	gf_enum_directory((const char *) current_dir, 1, enum_dirs, NULL, NULL);
+	gf_enum_directory((const char *) current_dir, GF_TRUE, enum_dirs, NULL, NULL);
 	/*enum files*/
-	gf_enum_directory((char *) current_dir, 0, enum_files, NULL, NULL);
-    SendMessage(hList, LB_SETCURSEL, 0, 0);
+	gf_enum_directory((char *) current_dir, GF_FALSE, enum_files, NULL, NULL);
+	SendMessage(hList, LB_SETCURSEL, 0, 0);
 	SetFocus(hList);
 }
 
@@ -126,7 +126,7 @@ void refresh_playlist()
 	const char *ple = gf_cfg_get_key(cfg, "General", "PLEntry");
 	i = ple ? atoi(ple) : 0;
 	if (i>=count) i=0;
-    SendMessage(hList, LB_SETCURSEL, i, 0);
+	SendMessage(hList, LB_SETCURSEL, i, 0);
 	SetFocus(hList);
 }
 
@@ -147,9 +147,9 @@ void playlist_act(u32 act_type)
 		refresh_playlist();
 		return;
 	}
-    count = SendMessage(hList, LB_GETSELCOUNT, 0, 0);
+	count = SendMessage(hList, LB_GETSELCOUNT, 0, 0);
 	if (!count) return;
-    idx = SendMessage(hList, LB_GETCURSEL, 0, 0);
+	idx = SendMessage(hList, LB_GETCURSEL, 0, 0);
 
 	if ((act_type==1) && !idx) return;
 	else if ((act_type==2) && (idx+1==count)) return;
@@ -165,37 +165,37 @@ void playlist_act(u32 act_type)
 		if (idx+1==count) idx--;
 		break;
 	/*up*/
-	case 1: 
+	case 1:
 		gf_cfg_insert_key(cfg, "Playlist", entry, "", idx-1);
 		idx--;
 		break;
 	/*down*/
-	case 2: 
+	case 2:
 		gf_cfg_insert_key(cfg, "Playlist", entry, "", idx+1);
 		idx++;
 		break;
 	}
 	refresh_playlist();
-    SendMessage(hList, LB_SETCURSEL, idx, 0);
+	SendMessage(hList, LB_SETCURSEL, idx, 0);
 	SetFocus(hList);
 }
 
-Bool add_files(void *cbk, char *name, char *path)
+Bool add_files(void *cbk, char *name, char *path, GF_FileEnumInfo *file_info)
 {
 	if (!bViewUnknownTypes && extension_list) {
 		char *ext = strrchr(name, '.');
-		if (!ext || !strstr(extension_list, ext+1)) return 0;
+		if (!ext || !strstr(extension_list, ext+1)) return GF_FALSE;
 	}
 	gf_cfg_set_key(cfg, "Playlist", path, "");
-	return 0;
+	return GF_FALSE;
 }
 
 void process_list_change(HWND hWnd, Bool add_to_pl)
 {
 	TCHAR sTxt[GF_MAX_PATH];
-    if (!SendMessage(hList, LB_GETSELCOUNT, 0, 0)) return;
+	if (!SendMessage(hList, LB_GETSELCOUNT, 0, 0)) return;
 
-    u32 idx = SendMessage(hList, LB_GETCURSEL, 0, 0);
+	u32 idx = SendMessage(hList, LB_GETCURSEL, 0, 0);
 	SendMessage(hList, LB_GETTEXT, idx, (LPARAM)(LPCTSTR) sTxt);
 
 	DWORD param = SendMessage(hList, LB_GETITEMDATA, idx, 0);
@@ -216,7 +216,7 @@ void process_list_change(HWND hWnd, Bool add_to_pl)
 				wcscat(wdir, sTxt+2);
 				wcscat(wdir, _T("\\"));
 				CE_WideToChar((u16 *) wdir, (char *) dir);
-				gf_enum_directory(dir, 0, add_files, NULL, NULL);
+				gf_enum_directory(dir, GF_FALSE, add_files, NULL, NULL);
 			} else {
 				wcscat(w_current_dir, sTxt+2);
 				wcscat(w_current_dir, _T("\\"));
@@ -249,44 +249,44 @@ void process_list_change(HWND hWnd, Bool add_to_pl)
 
 BOOL InitFileDialog(const HWND hWnd)
 {
-    TCHAR           psz[80];
-    ZeroMemory(psz, sizeof(psz));
-    SHINITDLGINFO sid;
+	TCHAR           psz[80];
+	ZeroMemory(psz, sizeof(psz));
+	SHINITDLGINFO sid;
 	ZeroMemory(&sid, sizeof(sid));
-    sid.dwMask  = SHIDIM_FLAGS;
-    sid.dwFlags = SHIDIF_SIZEDLGFULLSCREEN;
-    sid.hDlg    = hWnd;
+	sid.dwMask  = SHIDIM_FLAGS;
+	sid.dwFlags = SHIDIF_SIZEDLGFULLSCREEN;
+	sid.hDlg    = hWnd;
 
 	if (FALSE == SHInitDialog(&sid))
 		return FALSE;
 
-    SHMENUBARINFO mbi;
+	SHMENUBARINFO mbi;
 	ZeroMemory(&mbi, sizeof(SHMENUBARINFO));
 	mbi.cbSize      = sizeof(SHMENUBARINFO);
 	mbi.hwndParent  = hWnd;
 	mbi.nToolBarId  = IDR_MENU_OPEN;
 	mbi.hInstRes    = g_hInst;
 
-    if (FALSE == SHCreateMenuBar(&mbi))
-    {
-        return FALSE;
-    }
-    g_hWndMenuBar = mbi.hwndMB;
-    
-    ShowWindow(g_hWndMenuBar, SW_SHOW);
+	if (FALSE == SHCreateMenuBar(&mbi))
+	{
+		return FALSE;
+	}
+	g_hWndMenuBar = mbi.hwndMB;
+
+	ShowWindow(g_hWndMenuBar, SW_SHOW);
 
 	the_wnd = hWnd;
 
-    hDirTxt = GetDlgItem(hWnd, IDC_DIRNAME);
-    hList = GetDlgItem(hWnd, IDC_FILELIST);
-    g_hMenuView = (HMENU)SendMessage(g_hWndMenuBar, SHCMBM_GETSUBMENU, 0, ID_OF_VIEW);
+	hDirTxt = GetDlgItem(hWnd, IDC_DIRNAME);
+	hList = GetDlgItem(hWnd, IDC_FILELIST);
+	g_hMenuView = (HMENU)SendMessage(g_hWndMenuBar, SHCMBM_GETSUBMENU, 0, ID_OF_VIEW);
 
 	RECT rc;
 	GetClientRect(hWnd, &rc);
 	u32 caption_h = GetSystemMetrics(SM_CYCAPTION) - 3;
 	MoveWindow(hDirTxt, 0, 0, rc.right - rc.left, caption_h, 1);
 	MoveWindow(hList, 0, caption_h, rc.right - rc.left, rc.bottom - rc.top - caption_h, 1);
-	
+
 	if (playlist_mode) {
 		refresh_playlist();
 	} else {
@@ -300,46 +300,46 @@ BOOL InitFileDialog(const HWND hWnd)
 	return TRUE;
 }
 
-BOOL CALLBACK FileDialogProc(const HWND hWnd, const UINT Msg, const WPARAM wParam, const LPARAM lParam) 
+BOOL CALLBACK FileDialogProc(const HWND hWnd, const UINT Msg, const WPARAM wParam, const LPARAM lParam)
 {
 	BOOL bProcessedMsg = TRUE;
 
-    switch (Msg) {
-    case WM_INITDIALOG:
-        if (FALSE == InitFileDialog(hWnd))
-            EndDialog(hWnd, -1);
-        break;
+	switch (Msg) {
+	case WM_INITDIALOG:
+		if (FALSE == InitFileDialog(hWnd))
+			EndDialog(hWnd, -1);
+		break;
 
-    case WM_ACTIVATE:
-        if (WA_INACTIVE != LOWORD(wParam)) SetFocus(hWnd);
-        break;
+	case WM_ACTIVATE:
+		if (WA_INACTIVE != LOWORD(wParam)) SetFocus(hWnd);
+		break;
 
-    case WM_CLOSE:
+	case WM_CLOSE:
 		EndDialog(hWnd, 0);
 		break;
 
-    case WM_COMMAND:
+	case WM_COMMAND:
 		if (LOWORD(wParam) == IDC_FILELIST) {
 			if (HIWORD(wParam) == LBN_DBLCLK) {
-		        process_list_change(hWnd, 0);
+				process_list_change(hWnd, GF_FALSE);
 			} else {
-	            bProcessedMsg = FALSE;
+				bProcessedMsg = FALSE;
 			}
 		} else {
 			switch (LOWORD(wParam)) {
 			case IDOK:
-				process_list_change(hWnd, 0);
+				process_list_change(hWnd, GF_FALSE);
 				break;
 			case IDCANCEL:
 				EndDialog(hWnd, 0);
 				break;
 			case IDM_OF_VIEW_ALL:
-				bViewUnknownTypes = !bViewUnknownTypes;
+				bViewUnknownTypes = (Bool) !bViewUnknownTypes;
 				refresh_menu_states();
 				set_directory(w_current_dir);
 				break;
 			case IDM_OF_PLAYLIST:
-				playlist_mode = !playlist_mode;
+				playlist_mode = (Bool) !playlist_mode;
 				if (playlist_mode) refresh_playlist();
 				else set_directory(w_current_dir);
 				switch_menu_pl();
@@ -348,7 +348,7 @@ BOOL CALLBACK FileDialogProc(const HWND hWnd, const UINT Msg, const WPARAM wPara
 				if (playlist_mode) {
 					playlist_act(0);
 				} else {
-					process_list_change(hWnd, 1);
+					process_list_change(hWnd, GF_TRUE);
 				}
 				break;
 			case IDM_OF_PL_UP:
@@ -365,28 +365,28 @@ BOOL CALLBACK FileDialogProc(const HWND hWnd, const UINT Msg, const WPARAM wPara
 				break;
 			}
 		}
-        break;
+		break;
 	case WM_KEYDOWN:
 		switch (wParam) {
-		case VK_LEFT: 
-		case '1': 
-			playlist_act(1); 
+		case VK_LEFT:
+		case '1':
+			playlist_act(1);
 			break;
-		case VK_RIGHT: 
-		case '2': 
-			playlist_act(2); 
+		case VK_RIGHT:
+		case '2':
+			playlist_act(2);
 			break;
 		default:
-            bProcessedMsg = FALSE;
+			bProcessedMsg = FALSE;
 			break;
 		}
 		break;
 
-    default:
-        bProcessedMsg = FALSE;
-    }
-    
-    return bProcessedMsg;
+	default:
+		bProcessedMsg = FALSE;
+	}
+
+	return bProcessedMsg;
 }
 
 Bool gf_file_dialog(HINSTANCE inst, HWND parent, char *url, const char *ext_list, GF_Config *gpac_cfg)
@@ -396,8 +396,8 @@ Bool gf_file_dialog(HINSTANCE inst, HWND parent, char *url, const char *ext_list
 	g_hInst = inst;
 	cfg = gpac_cfg;
 	int iResult = DialogBox(inst, MAKEINTRESOURCE(IDD_FILEDIALOG), parent,(DLGPROC)FileDialogProc);
-	if (iResult>0) return 1;
-	return 0;
+	if (iResult>0) return GF_TRUE;
+	return GF_FALSE;
 }
 
 

@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -65,6 +65,14 @@ typedef struct
 {
 	u32 scheme_version;
 	u32 scheme_type;
+	u32 PSSH_count;
+	GF_NetComDRMConfigPSSH *PSSHs;
+} GF_CENCConfig;
+
+typedef struct
+{
+	u32 scheme_version;
+	u32 scheme_type;
 	const char *scheme_uri;
 	const char *kms_uri;
 	/*SHA-1 hash*/
@@ -102,6 +110,14 @@ typedef struct
 	Bool is_encrypted;
 	/*ISMA payload resync indicator*/
 	u64 isma_BSO;
+	/*CENC sample auxiliary information*/
+	char *sai;
+	u8 IV_size;
+	u32 saiz;
+	//for CENC pattern encryption mode
+	u8 crypt_byte_block, skip_byte_block;
+	u8 constant_IV_size;
+	bin128 constant_IV;
 } GF_IPMPEvent;
 
 /*interface name and version for IPMP tools*/

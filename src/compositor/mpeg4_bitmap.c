@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -35,7 +35,7 @@ typedef struct _bitmap_stack
 {
 	Drawable *graph;
 	/*cached size for 3D mode*/
-	SFVec2f size;
+	SFVec2f size, scale;
 	u32 prev_tx_w, prev_tx_h;
 	GF_Rect rc;
 } BitmapStack;
@@ -56,34 +56,38 @@ static void Bitmap_BuildGraph(GF_Node *node, BitmapStack *st, GF_TraverseState *
 	/*bitmap not ready*/
 	if (!txh || !txh->width || !txh->height
 #ifndef GPAC_DISABLE_3D
-		|| (tr_state->visual->type_3d && !txh->tx_io) 
+	        || (tr_state->visual->type_3d && !txh->tx_io)
 #endif
-		) {
+	   ) {
 		if (notify_changes) gf_node_dirty_set(node, 0, 1);
 		return;
 	}
 	/*no change in scale and same texture size*/
-	if (!gf_node_dirty_get(node) && (st->prev_tx_w == txh->width) && (st->prev_tx_h == txh->height)) {
+	if ((st->scale.x==bmp->scale.x) && (st->scale.y==bmp->scale.y) && (st->prev_tx_w == txh->width) && (st->prev_tx_h == txh->height)) {
 		*out_rc = st->rc;
+		gf_node_dirty_clear(node, 0);
 		return;
 	}
 
 	st->prev_tx_w = txh->width;
 	st->prev_tx_h = txh->height;
 
-	sx = bmp->scale.x; if (sx<0) sx = FIX_ONE;
-	sy = bmp->scale.y; if (sy<0) sy = FIX_ONE;
+	sx = bmp->scale.x;
+	if (sx<0) sx = FIX_ONE;
+	sy = bmp->scale.y;
+	if (sy<0) sy = FIX_ONE;
+	st->scale = bmp->scale;
 
 	compositor_adjust_scale(txh->owner, &sx, &sy);
 
 	/*check size change*/
-	size.x = txh->width*sx;
-	size.y = txh->height*sy;
+	size.x = gf_mulfix(INT2FIX(txh->width),sx);
+	size.y =  gf_mulfix(INT2FIX(txh->height),sy);
 	/*if we have a PAR update it!!*/
 	if (txh->pixel_ar) {
 		u32 n = (txh->pixel_ar>>16) & 0xFFFF;
 		u32 d = (txh->pixel_ar) & 0xFFFF;
-		size.x = ( (txh->width * n) / d) * sx;
+		size.x = gf_mulfix(INT2FIX( (txh->width * n) / d),sx);
 	}
 
 
@@ -96,7 +100,7 @@ static void Bitmap_BuildGraph(GF_Node *node, BitmapStack *st, GF_TraverseState *
 
 	gf_node_dirty_clear(node, 0);
 
-	if ((st->size.x==size.x) && (st->size.y==size.y)) return; 
+	if ((st->size.x==size.x) && (st->size.y==size.y)) return;
 	st->size = size;
 
 	/*change in size*/
@@ -110,8 +114,9 @@ static void Bitmap_BuildGraph(GF_Node *node, BitmapStack *st, GF_TraverseState *
 #ifndef GPAC_DISABLE_3D
 static void draw_bitmap_3d(GF_Node *node, GF_TraverseState *tr_state)
 {
+	GF_Node *appear;
 	DrawAspect2D asp;
-
+	GF_ColorKey keyColor;
 	BitmapStack *st = (BitmapStack *)gf_node_get_private(node);
 	M_Bitmap *bmp = (M_Bitmap *)node;
 
@@ -121,13 +126,33 @@ static void draw_bitmap_3d(GF_Node *node, GF_TraverseState *tr_state)
 	memset(&asp, 0, sizeof(DrawAspect2D));
 	drawable_get_aspect_2d_mpeg4(node, &asp, tr_state);
 
+	appear = tr_state->override_appearance ? tr_state->override_appearance : tr_state->appear;
+	/*check for material key materialKey*/
+	if (appear) {
+		M_Appearance *app = (M_Appearance *)appear;
+		if ( app->material && (gf_node_get_tag((GF_Node *)app->material)==TAG_MPEG4_MaterialKey) ) {
+			M_MaterialKey*mk = (M_MaterialKey*)app->material;
+			if (mk->isKeyed) {
+				keyColor.r = FIX2INT(mk->keyColor.red * 255);
+				keyColor.g = FIX2INT(mk->keyColor.green * 255);
+				keyColor.b = FIX2INT(mk->keyColor.blue * 255);
+				keyColor.alpha = FIX2INT( (FIX_ONE - mk->transparency) * 255);
+				keyColor.low = FIX2INT(mk->lowThreshold * 255);
+				keyColor.high = FIX2INT(mk->highThreshold * 255);
+				tr_state->col_key = &keyColor;
+			}
+		}
+	}
+
 	compositor_3d_draw_bitmap(st->graph, &asp, tr_state, st->size.x, st->size.y, bmp->scale.x, bmp->scale.y);
+
+	tr_state->col_key = NULL;
 }
 #endif
 
 static void draw_bitmap_2d(GF_Node *node, GF_TraverseState *tr_state)
 {
-	GF_ColorKey *key, keyColor;
+	GF_ColorKey keyColor;
 	DrawableContext *ctx = tr_state->ctx;
 	BitmapStack *st = (BitmapStack *) gf_node_get_private(node);
 
@@ -136,7 +161,6 @@ static void draw_bitmap_2d(GF_Node *node, GF_TraverseState *tr_state)
 	ctx->transform.m[1] = ctx->transform.m[3] = 0;
 
 	/*check for material key materialKey*/
-	key = NULL;
 	if (ctx->appear) {
 		M_Appearance *app = (M_Appearance *)ctx->appear;
 		if ( app->material && (gf_node_get_tag((GF_Node *)app->material)==TAG_MPEG4_MaterialKey) ) {
@@ -148,14 +172,14 @@ static void draw_bitmap_2d(GF_Node *node, GF_TraverseState *tr_state)
 				keyColor.alpha = FIX2INT( (FIX_ONE - mk->transparency) * 255);
 				keyColor.low = FIX2INT(mk->lowThreshold * 255);
 				keyColor.high = FIX2INT(mk->highThreshold * 255);
-				key = &keyColor;
+				tr_state->col_key = &keyColor;
 
 			}
 		}
 	}
 
 	/*no HW, fall back to the graphics driver*/
-	if (!tr_state->visual->DrawBitmap(tr_state->visual, tr_state, ctx, key)) {
+	if (!tr_state->visual->DrawBitmap(tr_state->visual, tr_state, ctx)) {
 		GF_Matrix2D _mat;
 		GF_Rect rc = gf_rect_center(ctx->bi->unclip.width, ctx->bi->unclip.height);
 		gf_mx2d_copy(_mat, ctx->transform);
@@ -166,9 +190,8 @@ static void draw_bitmap_2d(GF_Node *node, GF_TraverseState *tr_state)
 		gf_path_add_rect_center(st->graph->path, 0, 0, rc.width, rc.height);
 		ctx->flags |= CTX_NO_ANTIALIAS;
 		visual_2d_texture_path(tr_state->visual, st->graph->path, ctx, tr_state);
-		return;
 	}
-
+	tr_state->col_key = NULL;
 }
 
 static void TraverseBitmap(GF_Node *node, void *rs, Bool is_destroy)
@@ -198,13 +221,13 @@ static void TraverseBitmap(GF_Node *node, void *rs, Bool is_destroy)
 		vrml_drawable_pick(st->graph, tr_state);
 		return;
 	case TRAVERSE_GET_BOUNDS:
-		Bitmap_BuildGraph(node, st, tr_state, &tr_state->bounds, 
+		Bitmap_BuildGraph(node, st, tr_state, &tr_state->bounds,
 #ifndef GPAC_DISABLE_3D
-			tr_state->visual->type_3d ? 1 : 0
+		                  tr_state->visual->type_3d ? 1 : 0
 #else
-		0
+		                  0
 #endif
-		);
+		                 );
 
 		return;
 	case TRAVERSE_SORT:
@@ -246,7 +269,7 @@ static void TraverseBitmap(GF_Node *node, void *rs, Bool is_destroy)
 				}
 				ctx->flags |= CTX_IS_TRANSPARENT;
 			}
-		} 
+		}
 		else if (!tr_state->color_mat.identity) {
 			ctx->flags |= CTX_IS_TRANSPARENT;
 		} else {
@@ -257,7 +280,7 @@ static void TraverseBitmap(GF_Node *node, void *rs, Bool is_destroy)
 		}
 	}
 
-	/*bounds are stored when building graph*/	
+	/*bounds are stored when building graph*/
 	drawable_finalize_sort(ctx, tr_state, &rc);
 }
 
@@ -266,6 +289,10 @@ void compositor_init_bitmap(GF_Compositor  *compositor, GF_Node *node)
 {
 	BitmapStack *st;
 	GF_SAFEALLOC(st, BitmapStack);
+	if (!st) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate bitmap stack\n"));
+		return;
+	}
 	st->graph = drawable_new();
 	st->graph->node = node;
 	st->graph->flags = DRAWABLE_USE_TRAVERSE_DRAW;

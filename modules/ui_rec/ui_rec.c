@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2007-2012
  *			All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -52,7 +52,7 @@ Bool uir_on_event_play(GF_UIRecord *uir , GF_Event *event, Bool consumed_by_comp
 		}
 		break;
 	}
-	return 0;
+	return GF_FALSE;
 }
 
 Bool uir_on_event_record(GF_UIRecord *uir , GF_Event *event, Bool consumed_by_compositor)
@@ -63,10 +63,10 @@ Bool uir_on_event_record(GF_UIRecord *uir , GF_Event *event, Bool consumed_by_co
 			uir->ck = uir->term->root_scene->scene_codec ? uir->term->root_scene->scene_codec->ck : uir->term->root_scene->dyn_ck;
 		}
 		break;
-	case GF_EVENT_CLICK: 
+	case GF_EVENT_CLICK:
 	case GF_EVENT_MOUSEUP:
-	case GF_EVENT_MOUSEDOWN: 
-	case GF_EVENT_MOUSEOVER: 
+	case GF_EVENT_MOUSEDOWN:
+	case GF_EVENT_MOUSEOVER:
 	case GF_EVENT_MOUSEOUT:
 	/*!! ALL MOUSE EVENTS SHALL BE DECLARED BEFORE MOUSEMOVE !! */
 	case GF_EVENT_MOUSEMOVE:
@@ -97,23 +97,23 @@ Bool uir_on_event_record(GF_UIRecord *uir , GF_Event *event, Bool consumed_by_co
 		gf_bs_write_u32(uir->bs, event->character.unicode_char);
 		break;
 	}
-	return 0;
+	return GF_FALSE;
 }
 
 void uir_load_event(GF_UIRecord *uir)
 {
 	memset(&uir->next_event, 0, sizeof(GF_Event));
-	uir->evt_loaded = 0;
+	uir->evt_loaded = GF_FALSE;
 	if (!gf_bs_available(uir->bs)) return;
 
 
 	uir->next_time = gf_bs_read_u32(uir->bs);
 	uir->next_event.type = gf_bs_read_u8(uir->bs);
 	switch (uir->next_event.type) {
-	case GF_EVENT_CLICK: 
+	case GF_EVENT_CLICK:
 	case GF_EVENT_MOUSEUP:
-	case GF_EVENT_MOUSEDOWN: 
-	case GF_EVENT_MOUSEOVER: 
+	case GF_EVENT_MOUSEDOWN:
+	case GF_EVENT_MOUSEOVER:
 	case GF_EVENT_MOUSEOUT:
 	/*!! ALL MOUSE EVENTS SHALL BE DECLARED BEFORE MOUSEMOVE !! */
 	case GF_EVENT_MOUSEMOVE:
@@ -138,25 +138,25 @@ void uir_load_event(GF_UIRecord *uir)
 		uir->next_event.character.unicode_char = gf_bs_read_u32(uir->bs);
 		break;
 	}
-	uir->evt_loaded = 1;
+	uir->evt_loaded = GF_TRUE;
 }
 
 static Bool uir_process(GF_TermExt *termext, u32 action, void *param)
 {
 	const char *opt, *uifile;
-	GF_UIRecord *uir = termext->udta;
+	GF_UIRecord *uir = (GF_UIRecord*)termext->udta;
 
 	switch (action) {
 	case GF_TERM_EXT_START:
 		uir->term = (GF_Terminal *) param;
 		opt = gf_modules_get_option((GF_BaseInterface*)termext, "UIRecord", "Mode");
-		if (!opt) return 0;
+		if (!opt) return GF_FALSE;
 		uifile = gf_modules_get_option((GF_BaseInterface*)termext, "UIRecord", "File");
-		if (!uifile) return 0;
+		if (!uifile) return GF_FALSE;
 
 		if (!strcmp(opt, "Play")) {
-			uir->uif = gf_f64_open(uifile, "rb");
-			if (!uir->uif) return 0;
+			uir->uif = gf_fopen(uifile, "rb");
+			if (!uir->uif) return GF_FALSE;
 			uir->bs = gf_bs_from_file(uir->uif, GF_BITSTREAM_READ);
 			termext->caps |= GF_TERM_EXTENSION_NOT_THREADED;
 
@@ -166,20 +166,20 @@ static Bool uir_process(GF_TermExt *termext, u32 action, void *param)
 
 			uir_load_event(uir);
 		} else if (!strcmp(opt, "Record")) {
-			uir->uif = gf_f64_open(uifile, "wb");
-			if (!uir->uif) return 0;
+			uir->uif = gf_fopen(uifile, "wb");
+			if (!uir->uif) return GF_FALSE;
 			uir->bs = gf_bs_from_file(uir->uif, GF_BITSTREAM_WRITE);
 
 			uir->evt_filter.on_event = uir_on_event_record;
 			uir->evt_filter.udta = uir;
 			gf_term_add_event_filter(uir->term, &uir->evt_filter);
 		} else {
-			return 0;
+			return GF_FALSE;
 		}
-		return 1;
+		return GF_TRUE;
 
 	case GF_TERM_EXT_STOP:
-		if (uir->uif) fclose(uir->uif);
+		if (uir->uif) gf_fclose(uir->uif);
 		if (uir->bs) gf_bs_del(uir->bs);
 		gf_term_remove_event_filter(uir->term, &uir->evt_filter);
 		uir->term = NULL;
@@ -195,7 +195,7 @@ static Bool uir_process(GF_TermExt *termext, u32 action, void *param)
 		}
 		break;
 	}
-	return 0;
+	return GF_FALSE;
 }
 
 
@@ -217,29 +217,29 @@ GF_TermExt *uir_new()
 void uir_delete(GF_BaseInterface *ifce)
 {
 	GF_TermExt *dr = (GF_TermExt *) ifce;
-	GF_UIRecord *uir = dr->udta;
+	GF_UIRecord *uir = (GF_UIRecord*)dr->udta;
 	gf_free(uir);
 	gf_free(dr);
 }
 
-GF_EXPORT
-const u32 *QueryInterfaces() 
+GPAC_MODULE_EXPORT
+const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
 		GF_TERM_EXT_INTERFACE,
 		0
 	};
-	return si; 
+	return si;
 }
 
-GF_EXPORT
-GF_BaseInterface *LoadInterface(u32 InterfaceType) 
+GPAC_MODULE_EXPORT
+GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	if (InterfaceType == GF_TERM_EXT_INTERFACE) return (GF_BaseInterface *)uir_new();
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -248,3 +248,5 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 		break;
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( ui_rec )

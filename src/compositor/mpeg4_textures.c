@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -38,8 +38,8 @@ extern "C" {
 /*for cache texture decode and hash*/
 #include <gpac/avparse.h>
 #include <gpac/crypt.h>
-	
-	
+
+
 typedef struct
 {
 	GF_TextureHandler txh;
@@ -69,17 +69,19 @@ static Bool movietexture_get_loop(MovieTextureStack *stack, M_MovieTexture *mt)
 static void movietexture_activate(MovieTextureStack *stack, M_MovieTexture *mt, Double scene_time)
 {
 	mt->isActive = 1;
-	gf_node_event_out_str((GF_Node*)mt, "isActive");
+	gf_node_event_out((GF_Node*)mt, 8/*"isActive"*/);
 	if (!stack->txh.is_open) {
 		scene_time -= mt->startTime;
 		gf_sc_texture_play_from_to(&stack->txh, &mt->url, scene_time, -1, gf_mo_get_loop(stack->txh.stream, mt->loop), 0);
+	} else if (stack->first_frame_fetched) {
+		gf_mo_resume(stack->txh.stream);
 	}
 	gf_mo_set_speed(stack->txh.stream, mt->speed);
 }
 static void movietexture_deactivate(MovieTextureStack *stack, M_MovieTexture *mt)
 {
 	mt->isActive = 0;
-	gf_node_event_out_str((GF_Node*)mt, "isActive");
+	gf_node_event_out((GF_Node*)mt, 8/*"isActive"*/);
 	stack->time_handle.needs_unregister = 1;
 
 	if (stack->txh.is_open) {
@@ -90,13 +92,13 @@ static void movietexture_update(GF_TextureHandler *txh)
 {
 	M_MovieTexture *txnode = (M_MovieTexture *) txh->owner;
 	MovieTextureStack *st = (MovieTextureStack *) gf_node_get_private(txh->owner);
-	
+
 	/*setup texture if needed*/
 	if (!txh->is_open) return;
 	if (!txnode->isActive && st->first_frame_fetched) return;
 
 	/*when fetching the first frame disable resync*/
-	gf_sc_texture_update_frame(txh, !txnode->isActive);
+	gf_sc_texture_update_frame(txh, 0);
 
 	if (txh->stream_finished) {
 		if (movietexture_get_loop(st, txnode)) {
@@ -111,18 +113,18 @@ static void movietexture_update(GF_TextureHandler *txh)
 	if (!st->first_frame_fetched && (txh->needs_refresh) ) {
 		st->first_frame_fetched = 1;
 		txnode->duration_changed = gf_mo_get_duration(txh->stream);
-		gf_node_event_out_str(txh->owner, "duration_changed");
+		gf_node_event_out(txh->owner, 7/*"duration_changed"*/);
 		/*stop stream if needed*/
 		if (!txnode->isActive && txh->is_open) {
-			gf_sc_texture_stop(txh);
+			gf_mo_pause(txh->stream);
 			/*make sure the refresh flag is not cleared*/
 			txh->needs_refresh = 1;
+			gf_sc_invalidate(txh->compositor, NULL);
 		}
 	}
 	if (txh->needs_refresh) {
 		/*mark all subtrees using this image as dirty*/
 		gf_node_dirty_parents(txh->owner);
-		gf_sc_invalidate(txh->compositor, NULL);
 	}
 }
 
@@ -131,7 +133,7 @@ static void movietexture_update_time(GF_TimeNode *st)
 	Double time;
 	M_MovieTexture *mt = (M_MovieTexture *)st->udta;
 	MovieTextureStack *stack = (MovieTextureStack *)gf_node_get_private(st->udta);
-	
+
 	/*not active, store start time and speed*/
 	if ( ! mt->isActive) {
 		stack->start_time = mt->startTime;
@@ -139,15 +141,17 @@ static void movietexture_update_time(GF_TimeNode *st)
 	time = gf_node_get_scene_time(st->udta);
 
 	if (time < stack->start_time ||
-		/*special case if we're getting active AFTER stoptime */
-		(!mt->isActive && (mt->stopTime > stack->start_time) && (time>=mt->stopTime))
+	        /*special case if we're getting active AFTER stoptime */
+	        (!mt->isActive && (mt->stopTime > stack->start_time) && (time>=mt->stopTime))
 //		|| (!stack->start_time && !stack->is_x3d && !mt->loop)
-		) {
+	   ) {
 		/*opens stream only at first access to fetch first frame*/
 		if (stack->fetch_first_frame) {
 			stack->fetch_first_frame = 0;
 			if (!stack->txh.is_open)
 				gf_sc_texture_play(&stack->txh, &mt->url);
+			else
+				gf_mo_resume(stack->txh.stream);
 		}
 		return;
 	}
@@ -161,16 +165,21 @@ static void movietexture_update_time(GF_TimeNode *st)
 	}
 
 	/*we're (about to be) active: VRML:
-	"A time-dependent node is inactive until its startTime is reached. When time now becomes greater than or 
+	"A time-dependent node is inactive until its startTime is reached. When time now becomes greater than or
 	equal to startTime, an isActive TRUE event is generated and the time-dependent node becomes active 	*/
 
 	if (! mt->isActive) movietexture_activate(stack, mt, time);
+	stack->txh.stream_finished = GF_FALSE;
 }
 
 void compositor_init_movietexture(GF_Compositor *compositor, GF_Node *node)
 {
 	MovieTextureStack *st;
 	GF_SAFEALLOC(st, MovieTextureStack);
+	if (!st) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate movie texture stack\n"));
+		return;
+	}
 	gf_sc_texture_setup(&st->txh, compositor, node);
 	st->txh.update_texture_fcnt = movietexture_update;
 	st->time_handle.UpdateTimeNode = movietexture_update_time;
@@ -179,14 +188,14 @@ void compositor_init_movietexture(GF_Compositor *compositor, GF_Node *node)
 	st->txh.flags = 0;
 	if (((M_MovieTexture*)node)->repeatS) st->txh.flags |= GF_SR_TEXTURE_REPEAT_S;
 	if (((M_MovieTexture*)node)->repeatT) st->txh.flags |= GF_SR_TEXTURE_REPEAT_T;
-	
+
 #ifndef GPAC_DISABLE_X3D
 	st->is_x3d = (gf_node_get_tag(node)==TAG_X3D_MovieTexture) ? 1 : 0;
 #endif
 
 	gf_node_set_private(node, st);
 	gf_node_set_callback_function(node, movietexture_destroy);
-	
+
 	gf_sc_register_time_node(compositor, &st->time_handle);
 }
 
@@ -206,7 +215,7 @@ void compositor_movietexture_modified(GF_Node *node)
 	if (gf_sc_texture_check_url_change(&st->txh, &mt->url)) {
 		if (st->txh.is_open) gf_sc_texture_stop(&st->txh);
 		if (mt->isActive) gf_sc_texture_play(&st->txh, &mt->url);
-	} 
+	}
 	/*update state if we're active*/
 	else if (mt->isActive) {
 		movietexture_update_time(&st->time_handle);
@@ -221,15 +230,15 @@ static void imagetexture_destroy(GF_Node *node, void *rs, Bool is_destroy)
 {
 	if (is_destroy) {
 		GF_TextureHandler *txh = (GF_TextureHandler *) gf_node_get_private(node);
-		
-		/*cleanup cache if needed*/ 
+
+		/*cleanup cache if needed*/
 		if (gf_node_get_tag(node)==TAG_MPEG4_CacheTexture) {
-			char section[16];
+			char section[64];
 			const char *opt, *file;
 			Bool delete_file = 1;
 			M_CacheTexture *ct = (M_CacheTexture*)node;
 
-			sprintf(section, "@cache=%08X", (u32) (PTR_TO_U_CAST ct));
+			sprintf(section, "@cache=%p", ct);
 			file = gf_cfg_get_key(txh->compositor->user->config, section, "cacheFile");
 			opt = gf_cfg_get_key(txh->compositor->user->config, section, "expireAfterNTP");
 
@@ -262,18 +271,18 @@ static void imagetexture_update(GF_TextureHandler *txh)
 			gf_sc_texture_play(txh, &url);
 		}
 		gf_sc_texture_update_frame(txh, 0);
-		
+
 		if (
-			/*URL is present but not opened - redraw till fetch*/
-			/* (txh->stream && !txh->tx_io) && */ 
-			/*image has been updated*/
-			txh->needs_refresh) {
+		    /*URL is present but not opened - redraw till fetch*/
+		    /* (txh->stream && !txh->tx_io) && */
+		    /*image has been updated*/
+		    txh->needs_refresh) {
 			/*mark all subtrees using this image as dirty*/
 			gf_node_dirty_parents(txh->owner);
 			gf_sc_invalidate(txh->compositor, NULL);
 		}
 		return;
-	} 
+	}
 	/*cache texture case*/
 	else {
 		M_CacheTexture *ct = (M_CacheTexture *) txh->owner;
@@ -284,47 +293,66 @@ static void imagetexture_update(GF_TextureHandler *txh)
 			u32 out_size;
 			GF_Err e;
 
-			/*BT/XMT playback*/
+			/*BT/XMT playback: load to memory*/
 			if (ct->image.buffer) {
-				e = gf_img_file_dec(ct->image.buffer, &ct->objectTypeIndication, &txh->width, &txh->height, &txh->pixelformat, &txh->data, &out_size);
-				if (e==GF_OK) {
-					txh->needs_refresh = 1;
-					txh->stride = out_size / txh->height;
-				}
-			} 
-			/*BIFS decoded playback*/
-			else {
-				switch (ct->objectTypeIndication) {
-				case GPAC_OTI_IMAGE_JPEG:
-					out_size = 0;
-					e = gf_img_jpeg_dec(ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, NULL, &out_size, 3);
-					if (e==GF_BUFFER_TOO_SMALL) {
-						u32 BPP;
-						txh->data = gf_malloc(sizeof(char) * out_size);
-						if (txh->pixelformat==GF_PIXEL_GREYSCALE) BPP = 1;
-						else BPP = 3;
-
-						e = gf_img_jpeg_dec(ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, txh->data, &out_size, BPP);
-						if (e==GF_OK) {
-							txh->needs_refresh = 1;
-							txh->stride = out_size / txh->height;
-						}
+				char *par = (char *) gf_scene_get_service_url( gf_node_get_graph(txh->owner ) );
+				char *src_url = gf_url_concatenate(par, ct->image.buffer);
+				FILE *test = gf_fopen( src_url ? src_url : ct->image.buffer, "rb");
+				if (test) {
+					fseek(test, 0, SEEK_END);
+					ct->data_len = (u32) gf_ftell(test);
+					ct->data = gf_malloc(sizeof(char)*ct->data_len);
+					fseek(test, 0, SEEK_SET);
+					if (ct->data_len != fread(ct->data, 1, ct->data_len, test)) {
+						GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to load CacheTexture data from file %s: IO err\n", src_url ? src_url : ct->image.buffer ) );
+						gf_free(ct->data);
+						ct->data = NULL;
+						ct->data_len = 0;
 					}
-					break;
-				case GPAC_OTI_IMAGE_PNG:
-					out_size = 0;
-					e = gf_img_png_dec(ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, NULL, &out_size);
-					if (e==GF_BUFFER_TOO_SMALL) {
-						txh->data = gf_malloc(sizeof(char) * out_size);
-						e = gf_img_png_dec(ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, txh->data, &out_size);
-						if (e==GF_OK) {
-							txh->needs_refresh = 1;
-							txh->stride = out_size / txh->height;
-						}
-					}
-					break;
+					gf_fclose(test);
+				} else {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to load CacheTexture data from file %s: not found\n", src_url ? src_url : ct->image.buffer ) );
 				}
+				ct->image.buffer = NULL;
+				if (src_url) gf_free(src_url);
 			}
+
+			/*BIFS decoded playback*/
+			switch (ct->objectTypeIndication) {
+			case GPAC_OTI_IMAGE_JPEG:
+				out_size = 0;
+				e = gf_img_jpeg_dec((char *) ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, NULL, &out_size, 3);
+				if (e==GF_BUFFER_TOO_SMALL) {
+					u32 BPP;
+					txh->data = gf_malloc(sizeof(char) * out_size);
+					if (txh->pixelformat==GF_PIXEL_GREYSCALE) BPP = 1;
+					else BPP = 3;
+
+					e = gf_img_jpeg_dec((char *) ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, txh->data, &out_size, BPP);
+					if (e==GF_OK) {
+						gf_sc_texture_allocate(txh);
+						gf_sc_texture_set_data(txh);
+						txh->needs_refresh = 1;
+						txh->stride = out_size / txh->height;
+					}
+				}
+				break;
+			case GPAC_OTI_IMAGE_PNG:
+				out_size = 0;
+				e = gf_img_png_dec((char *) ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, NULL, &out_size);
+				if (e==GF_BUFFER_TOO_SMALL) {
+					txh->data = gf_malloc(sizeof(char) * out_size);
+					e = gf_img_png_dec((char *) ct->data, ct->data_len, &txh->width, &txh->height, &txh->pixelformat, txh->data, &out_size);
+					if (e==GF_OK) {
+						gf_sc_texture_allocate(txh);
+						gf_sc_texture_set_data(txh);
+						txh->needs_refresh = 1;
+						txh->stride = out_size / txh->height;
+					}
+				}
+				break;
+			}
+
 #endif // GPAC_DISABLE_AV_PARSERS
 
 			/*cacheURL is specified, store the image*/
@@ -332,7 +360,7 @@ static void imagetexture_update(GF_TextureHandler *txh)
 				u32 i;
 				u8 hash[20];
 				FILE *cached_texture;
-				char szExtractName[GF_MAX_PATH], section[16], *opt, *src_url;
+				char szExtractName[GF_MAX_PATH], section[64], *opt, *src_url;
 				opt = (char *) gf_cfg_get_key(txh->compositor->user->config, "General", "CacheDirectory");
 				if (opt) {
 					strcpy(szExtractName, opt);
@@ -344,7 +372,7 @@ static void imagetexture_update(GF_TextureHandler *txh)
 				strcat(szExtractName, "/");
 				src_url = (char *) gf_scene_get_service_url( gf_node_get_graph(txh->owner ) );
 
-				gf_sha1_csum(src_url, strlen(src_url), hash);
+				gf_sha1_csum((u8 *)src_url, (u32) strlen(src_url), hash);
 				for (i=0; i<20; i++) {
 					char t[3];
 					t[2] = 0;
@@ -354,15 +382,15 @@ static void imagetexture_update(GF_TextureHandler *txh)
 				strcat(szExtractName, "_");
 
 				strcat(szExtractName, ct->cacheURL.buffer);
-				cached_texture = gf_f64_open(szExtractName, "wb");
+				cached_texture = gf_fopen(szExtractName, "wb");
 				if (cached_texture) {
 					gf_fwrite(ct->data, 1, ct->data_len, cached_texture);
-					fclose(cached_texture);
+					gf_fclose(cached_texture);
 				}
 
 				/*and write cache info*/
 				if (ct->expirationDate!=0) {
-					sprintf(section, "@cache=%08X", (u32) (PTR_TO_U_CAST ct));
+					sprintf(section, "@cache=%p", ct);
 					gf_cfg_set_key(txh->compositor->user->config, section, "serviceURL", src_url);
 					gf_cfg_set_key(txh->compositor->user->config, section, "cacheFile", szExtractName);
 					gf_cfg_set_key(txh->compositor->user->config, section, "cacheName", ct->cacheURL.buffer);
@@ -392,6 +420,10 @@ void compositor_init_imagetexture(GF_Compositor *compositor, GF_Node *node)
 {
 	GF_TextureHandler *txh;
 	GF_SAFEALLOC(txh, GF_TextureHandler);
+	if (!txh) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate image texture stack\n"));
+		return;
+	}
 	gf_sc_texture_setup(txh, compositor, node);
 	txh->update_texture_fcnt = imagetexture_update;
 	gf_node_set_private(node, txh);
@@ -459,7 +491,7 @@ void compositor_imagetexture_modified(GF_Node *node)
 		return;
 	}
 	/*if not open and changed play*/
-	if (url.count) 
+	if (url.count)
 		gf_sc_texture_play(txh, &url);
 }
 
@@ -489,8 +521,8 @@ static void pixeltexture_update(GF_TextureHandler *txh)
 	if (!gf_node_dirty_get(txh->owner)) return;
 	gf_node_dirty_clear(txh->owner, 0);
 
-	
-	/*pixel texture doesn not use any media object but has data in the content. 
+
+	/*pixel texture doesn not use any media object but has data in the content.
 	However we still use the same texture object, just be carefull not to use media funtcions*/
 	txh->transparent = 0;
 	stride = pt->image.width;
@@ -530,7 +562,7 @@ static void pixeltexture_update(GF_TextureHandler *txh)
 		for (i=0; i<pt->image.height; i++) {
 			memcpy(st->pixels + i * stride, pt->image.pixels + i * stride, stride);
 		}
-	} 
+	}
 	/*revert pixel ordering...*/
 	else {
 		for (i=0; i<pt->image.height; i++) {
@@ -551,6 +583,10 @@ void compositor_init_pixeltexture(GF_Compositor *compositor, GF_Node *node)
 {
 	PixelTextureStack *st;
 	GF_SAFEALLOC(st, PixelTextureStack);
+	if (!st) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate pixel texture stack\n"));
+		return;
+	}
 	gf_sc_texture_setup(&st->txh, compositor, node);
 	st->pixels = NULL;
 	st->txh.update_texture_fcnt = pixeltexture_update;
@@ -577,6 +613,10 @@ void compositor_init_mattetexture(GF_Compositor *compositor, GF_Node *node)
 {
 	GF_TextureHandler *txh;
 	GF_SAFEALLOC(txh, GF_TextureHandler);
+	if (!txh) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate matte texture stack\n"));
+		return;
+	}
 	gf_sc_texture_setup(txh, compositor, node);
 	txh->flags = GF_SR_TEXTURE_MATTE;
 	txh->update_texture_fcnt = matte_update;

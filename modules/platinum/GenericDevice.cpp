@@ -1,25 +1,25 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2009-2012
  *			All rights reserved
  *
- *  This file is part of GPAC / Platinum UPnP module 
+ *  This file is part of GPAC / Platinum UPnP module
  *
  *  GPAC is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  *
  *	----------------------------------------------------------------------------------
@@ -31,23 +31,23 @@
 
 #include "GenericDevice.h"
 #include "GPACPlatinum.h"
-#include "PltXmlHelper.h"
+//#include "PltXmlHelper.h"
 
 NPT_SET_LOCAL_LOGGER("gpac.genericdevice")
 
-GPAC_ServiceItem::GPAC_ServiceItem(GPAC_DeviceItem *device, PLT_Service *service) : m_device(device), m_service(service) 
+GPAC_ServiceItem::GPAC_ServiceItem(GPAC_DeviceItem *device, PLT_Service *service) : m_device(device), m_service(service)
 {
 #ifdef GPAC_HAS_SPIDERMONKEY
 	obj = NULL;
 	on_event = JSVAL_NULL;
 	m_StateListeners = gf_list_new();
 	m_ArgListeners = gf_list_new();
-	subscribed = 0;
+	subscribed = GF_FALSE;
 	vars=NULL;
 #endif
 }
 
-GPAC_ServiceItem::~GPAC_ServiceItem() 
+GPAC_ServiceItem::~GPAC_ServiceItem()
 {
 #ifdef GPAC_HAS_SPIDERMONKEY
 	DetachJS();
@@ -57,7 +57,7 @@ GPAC_ServiceItem::~GPAC_ServiceItem()
 }
 
 #ifdef GPAC_HAS_SPIDERMONKEY
-void GPAC_ServiceItem::DetachJS() 
+void GPAC_ServiceItem::DetachJS()
 {
 	if (obj) {
 		gf_js_remove_root(js_ctx, &obj, GF_JSGC_OBJECT);
@@ -84,9 +84,9 @@ void GPAC_ServiceItem::DetachJS()
 #endif
 
 
-GPAC_DeviceItem::GPAC_DeviceItem(PLT_DeviceDataReference device, NPT_String uuid) 
-	: m_device(device), m_UUID(uuid) 
-{ 
+GPAC_DeviceItem::GPAC_DeviceItem(PLT_DeviceDataReference device, NPT_String uuid)
+	: m_device(device), m_UUID(uuid)
+{
 #ifdef GPAC_HAS_SPIDERMONKEY
 	obj = NULL;
 	js_ctx = NULL;
@@ -94,7 +94,7 @@ GPAC_DeviceItem::GPAC_DeviceItem(PLT_DeviceDataReference device, NPT_String uuid
 #endif
 }
 
-GPAC_DeviceItem::~GPAC_DeviceItem() 
+GPAC_DeviceItem::~GPAC_DeviceItem()
 {
 #ifdef GPAC_HAS_SPIDERMONKEY
 	DetachJS();
@@ -137,7 +137,7 @@ static JSBool SMJS_FUNCTION(upnp_service_set_listener)
 			gf_js_add_root(c, &service->on_event, GF_JSGC_VAL);
 			if (!service->subscribed) {
 				service->m_device->m_pUPnP->m_pGenericController->m_CtrlPoint->Subscribe(service->m_service);
-				service->subscribed = 1;
+				service->subscribed = GF_TRUE;
 			}
 		}
 		return JS_TRUE;
@@ -167,7 +167,7 @@ static JSBool SMJS_FUNCTION(upnp_service_set_listener)
 	gf_js_add_root(c, &svl->on_event, GF_JSGC_VAL);
 	if (!service->subscribed) {
 		service->m_device->m_pUPnP->m_pGenericController->m_CtrlPoint->Subscribe(service->m_service);
-		service->subscribed = 1;
+		service->subscribed = GF_TRUE;
 	}
 	SMJS_FREE(c, name);
 	return JS_TRUE;
@@ -179,13 +179,13 @@ static JSBool SMJS_FUNCTION(upnp_service_set_action_listener)
 	PLT_ArgumentDesc *desc;
 	GPAC_ActionArgListener *argl  = NULL;
 	char *name;
-	Bool script_callback = 0;
+	Bool script_callback = GF_FALSE;
 	u32 i;
 	SMJS_OBJ
 	SMJS_ARGS
 	GPAC_ServiceItem *service = (GPAC_ServiceItem *)SMJS_GET_PRIVATE(c, obj);
 	if (!service || (argc<2) || !JSVAL_IS_STRING(argv[0]) || !JSVAL_IS_OBJECT(argv[1])) return JS_FALSE;
-	
+
 	name = SMJS_CHARS(c, argv[0]);
 	if (!name) return JS_FALSE;
 
@@ -197,7 +197,7 @@ static JSBool SMJS_FUNCTION(upnp_service_set_action_listener)
 	desc = NULL;
 	if (argc==3) {
 		if (JSVAL_IS_BOOLEAN(argv[2])) {
-			script_callback = 1;
+			script_callback = GF_TRUE;
 		} else {
 			if (!JSVAL_IS_STRING(argv[2]) ) return JS_FALSE;
 			name = SMJS_CHARS(c, argv[2]);
@@ -238,7 +238,7 @@ static JSBool SMJS_FUNCTION(upnp_service_get_scpd)
 	NPT_String name;
 	SMJS_OBJ
 	GPAC_ServiceItem *service = (GPAC_ServiceItem *)SMJS_GET_PRIVATE(c, obj);
-	if (!service ) 
+	if (!service )
 		return JS_FALSE;
 
 	service->m_service->GetSCPDXML(name);
@@ -261,10 +261,10 @@ SMJS_DECL_FUNC_PROP_GET( upnpservice_getProperty)
 	if (!prop_name) return JS_FALSE;
 
 	if (!strcmp(prop_name, "Device")) {
-		*vp = OBJECT_TO_JSVAL(service->m_device->obj);
+		VPASSIGN( OBJECT_TO_JSVAL(service->m_device->obj) );
 	}
 	else if (!strcmp(prop_name, "ModifiedStateVariablesCount")) {
-		*vp = INT_TO_JSVAL(service->vars ? service->vars->GetItemCount() : 0);
+		VPASSIGN( INT_TO_JSVAL(service->vars ? service->vars->GetItemCount() : 0) );
 	}
 
 	SMJS_FREE(c, prop_name);
@@ -278,7 +278,7 @@ static JSBool SMJS_FUNCTION(upnp_service_has_var)
 	SMJS_OBJ
 	SMJS_ARGS
 	GPAC_ServiceItem *service = (GPAC_ServiceItem *)SMJS_GET_PRIVATE(c, obj);
-	if (!service || !argc || !JSVAL_IS_STRING(argv[0]) ) 
+	if (!service || !argc || !JSVAL_IS_STRING(argv[0]) )
 		return JS_FALSE;
 
 	name = SMJS_CHARS(c, argv[0]);
@@ -329,11 +329,11 @@ static JSBool SMJS_FUNCTION(upnp_service_call_action)
 	PLT_ActionReference action;
 
 	NPT_CHECK_SEVERE(
-		service->m_device->m_pUPnP->m_pGenericController->m_CtrlPoint->CreateAction(
-			service->m_device->m_device, 
-			service->m_service->GetServiceType(), 
-			action_name,
-			action)
+	    service->m_device->m_pUPnP->m_pGenericController->m_CtrlPoint->CreateAction(
+	        service->m_device->m_device,
+	        service->m_service->GetServiceType(),
+	        action_name,
+	        action)
 	);
 
 
@@ -380,11 +380,11 @@ static JSBool SMJS_FUNCTION(upnp_service_call_action)
 			SMJS_FREE(c, _param_val);
 
 			if (res != NPT_SUCCESS) return JS_FALSE;
-			
+
 			i+=2;
 		}
 		GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, (" )\n"));
-    }
+	}
 
 	if ((argc==3) && JSVAL_IS_OBJECT(argv[2])) {
 		act_udta = new 	GPAC_ActionUDTA();
@@ -416,7 +416,7 @@ GPAC_ServiceItem *GPAC_DeviceItem::FindService(const char *type)
 	count = gf_list_count(m_Services);
 	for (i=0; i<count; i++) {
 		serv = (GPAC_ServiceItem*)gf_list_get(m_Services, i);
-		if (serv->m_service->GetServiceType() == type) 
+		if (serv->m_service->GetServiceType() == type)
 			return serv;
 	}
 
@@ -424,10 +424,10 @@ GPAC_ServiceItem *GPAC_DeviceItem::FindService(const char *type)
 	if (m_device->FindServiceByType(type, service) != NPT_SUCCESS) return NULL;
 
 	serv = new GPAC_ServiceItem(this, service);
-	
+
 #ifdef GPAC_HAS_SPIDERMONKEY
 	serv->js_ctx = js_ctx;
-	serv->obj = JS_NewObject(serv->js_ctx, &m_pUPnP->upnpServiceClass, 0, obj);
+	serv->obj = JS_NewObject(serv->js_ctx, &m_pUPnP->upnpServiceClass._class, 0, obj);
 	gf_js_add_root(serv->js_ctx, &serv->obj, GF_JSGC_OBJECT);
 	SMJS_SET_PRIVATE(serv->js_ctx, serv->obj, serv);
 	JS_DefineProperty(serv->js_ctx, serv->obj, "Name", STRING_TO_JSVAL( JS_NewStringCopyZ(serv->js_ctx, service->GetServiceID()) ), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT);
@@ -439,7 +439,7 @@ GPAC_ServiceItem *GPAC_DeviceItem::FindService(const char *type)
 	JS_DefineFunction(serv->js_ctx, serv->obj, "CallAction", upnp_service_call_action, 2, 0);
 	JS_DefineFunction(serv->js_ctx, serv->obj, "SetActionListener", upnp_service_set_action_listener, 2, 0);
 	JS_DefineFunction(serv->js_ctx, serv->obj, "GetSCPD", upnp_service_get_scpd, 1, 0);
-	
+
 #endif
 
 	gf_list_add(m_Services, serv);
@@ -451,14 +451,14 @@ GPAC_GenericController::GPAC_GenericController(PLT_CtrlPointReference& ctrlPoint
 {
 	m_pUPnP = upnp;
 	m_CtrlPoint = ctrlPoint;
-    m_CtrlPoint->AddListener(this);
+	m_CtrlPoint->AddListener(this);
 	m_ControlPointLock = gf_mx_new("GenericController");
 	m_Devices = gf_list_new();
 }
 
 GPAC_GenericController::~GPAC_GenericController()
 {
-    m_CtrlPoint->RemoveListener(this);
+	m_CtrlPoint->RemoveListener(this);
 	gf_mx_del(m_ControlPointLock);
 	while (gf_list_count(m_Devices)) {
 		GPAC_DeviceItem*ms = (GPAC_DeviceItem*)gf_list_get(m_Devices, 0);
@@ -550,7 +550,7 @@ static JSBool SMJS_FUNCTION(upnp_action_get_error)
 	SMJS_OBJ
 	PLT_Action *action = (PLT_Action *) SMJS_GET_PRIVATE(c, obj);
 	if (!action ) return JS_FALSE;
-	SMJS_SET_RVAL( STRING_TO_JSVAL( JS_NewStringCopyZ(c, action->GetError( code ) ) ) );
+	SMJS_SET_RVAL( STRING_TO_JSVAL( JS_NewStringCopyZ(c, action->GetError( &code ) ) ) );
 	return JS_TRUE;
 }
 
@@ -567,14 +567,14 @@ NPT_Result GPAC_GenericController::OnActionResponse(NPT_Result res, PLT_ActionRe
 	PLT_Service* service = action->GetActionDesc().GetService();
 	NPT_String uuid;
 	GPAC_ActionUDTA *act_udta = (GPAC_ActionUDTA *)userdata;
-	
+
 	/*this is NOT an actionResponse to an action triggered on a generic device*/
 	if (act_udta && act_udta->m_Reserved) act_udta = NULL;
 
 	GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[UPnP] Receive %s Response - error code %d\n", (char *) action->GetActionDesc().GetName(), res));
 
 	gf_mx_p(m_ControlPointLock);
-       
+
 	/*get our device*/
 	uuid = service->GetDevice()->GetUUID();
 	count = gf_list_count(m_Devices);
@@ -614,7 +614,7 @@ NPT_Result GPAC_GenericController::OnActionResponse(NPT_Result res, PLT_ActionRe
 		if (argl->arg==NULL) {
 			act_l = argl;
 			continue;
-		} 
+		}
 		/*if error don't trigger listeners*/
 		if (res != NPT_SUCCESS) {
 			GF_LOG(GF_LOG_WARNING, GF_LOG_NETWORK, ("[UPnP] Receive %s Response: error on remote device %d\n", (char *) action->GetActionDesc().GetName(), res));
@@ -625,10 +625,10 @@ NPT_Result GPAC_GenericController::OnActionResponse(NPT_Result res, PLT_ActionRe
 			jsval argv[1], rval;
 
 			GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[UPnP] Calling handler for response %s argument %s\n", (char *) action->GetActionDesc().GetName(), (char *) argl->arg->GetName() ));
-			m_pUPnP->LockJavascript(1);
+			m_pUPnP->LockJavascript(GF_TRUE);
 			argv[0] = STRING_TO_JSVAL( JS_NewStringCopyZ(serv->js_ctx, value) );
 			JS_CallFunctionValue(serv->js_ctx, serv->obj, argl->on_event, 1, argv, &rval);
-			m_pUPnP->LockJavascript(0);
+			m_pUPnP->LockJavascript(GF_FALSE);
 		} else {
 			GF_LOG(GF_LOG_ERROR, GF_LOG_NETWORK, ("[UPnP] %s Response: couldn't get argument %s value\n", (char *) action->GetActionDesc().GetName(), (char *) argl->arg->GetName() ));
 		}
@@ -636,14 +636,14 @@ NPT_Result GPAC_GenericController::OnActionResponse(NPT_Result res, PLT_ActionRe
 
 	if (act_l) {
 		jsval rval;
-		m_pUPnP->LockJavascript(1);
+		m_pUPnP->LockJavascript(GF_TRUE);
 		if (act_l->is_script) {
 			JSObject *act_obj;
 			jsval argv[2];
 
 			GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[UPnP] Calling handler for response %s\n", (char *) action->GetActionDesc().GetName()));
 
-			act_obj = JS_NewObject(serv->js_ctx, &item->m_pUPnP->upnpDeviceClass, 0, item->obj);
+			act_obj = JS_NewObject(serv->js_ctx, &item->m_pUPnP->upnpDeviceClass._class, 0, item->obj);
 			SMJS_SET_PRIVATE(serv->js_ctx, act_obj, (void *)action.AsPointer() );
 			JS_DefineFunction(serv->js_ctx, act_obj, "GetArgumentValue", upnp_action_get_argument_value, 1, 0);
 			JS_DefineFunction(serv->js_ctx, act_obj, "GetErrorCode", upnp_action_get_error_code, 1, 0);
@@ -667,7 +667,7 @@ NPT_Result GPAC_GenericController::OnActionResponse(NPT_Result res, PLT_ActionRe
 		else {
 			GF_LOG(GF_LOG_ERROR, GF_LOG_NETWORK, ("[UPnP] response %s has error %d\n", (char *) action->GetActionDesc().GetName(), res ));
 		}
-		m_pUPnP->LockJavascript(0);
+		m_pUPnP->LockJavascript(GF_FALSE);
 	}
 	GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[UPnP] Done processing response %s\n", (char *) action->GetActionDesc().GetName()));
 
@@ -692,7 +692,7 @@ NPT_Result GPAC_GenericController::OnEventNotify(PLT_Service* service, NPT_List<
 	GPAC_StateVariableListener *svl;
 
 	gf_mx_p(m_ControlPointLock);
-       
+
 	NPT_String uuid = service->GetDevice()->GetUUID();
 	count = gf_list_count(m_Devices);
 	for (i=0; i<count; i++) {
@@ -705,7 +705,7 @@ NPT_Result GPAC_GenericController::OnEventNotify(PLT_Service* service, NPT_List<
 	gf_mx_v(m_ControlPointLock);
 
 	if (!item) return NPT_SUCCESS;
-	
+
 	count = gf_list_count(item->m_Services);
 	for (i=0; i<count; i++) {
 		serv = (GPAC_ServiceItem *)gf_list_get(item->m_Services, i);
@@ -715,10 +715,10 @@ NPT_Result GPAC_GenericController::OnEventNotify(PLT_Service* service, NPT_List<
 
 	if (!JSVAL_IS_NULL(serv->on_event)) {
 		jsval rval;
-		m_pUPnP->LockJavascript(1);
+		m_pUPnP->LockJavascript(GF_TRUE);
 		serv->vars = vars;
 		JS_CallFunctionValue(serv->js_ctx, serv->obj, serv->on_event, 0, 0, &rval);
-		m_pUPnP->LockJavascript(0);
+		m_pUPnP->LockJavascript(GF_FALSE);
 		serv->vars = NULL;
 	}
 
@@ -727,10 +727,10 @@ NPT_Result GPAC_GenericController::OnEventNotify(PLT_Service* service, NPT_List<
 		/*check if we can find our var in this list*/
 		if (vars->Contains(svl->var)) {
 			jsval argv[1], rval;
-			m_pUPnP->LockJavascript(1);
+			m_pUPnP->LockJavascript(GF_TRUE);
 			argv[0] = STRING_TO_JSVAL( JS_NewStringCopyZ(serv->js_ctx, svl->var->GetValue() ) );
 			JS_CallFunctionValue(serv->js_ctx, serv->obj, svl->on_event, 1, argv, &rval);
-			m_pUPnP->LockJavascript(0);
+			m_pUPnP->LockJavascript(GF_FALSE);
 		}
 
 	}
@@ -740,8 +740,8 @@ NPT_Result GPAC_GenericController::OnEventNotify(PLT_Service* service, NPT_List<
 }
 
 
-GPAC_Service::GPAC_Service(PLT_DeviceData* device, const char *type,  const char *id, const char *last_change_namespace)
-	: PLT_Service(device, type,  id, last_change_namespace)
+GPAC_Service::GPAC_Service(PLT_DeviceData* device, const char *type,  const char *id, const char *name, const char *last_change_namespace)
+	: PLT_Service(device, type,  id, name, last_change_namespace)
 {
 #ifdef GPAC_HAS_SPIDERMONKEY
 	m_pObj = NULL;
@@ -785,7 +785,7 @@ static JSBool SMJS_FUNCTION(upnp_service_set_state_variable)
 void GPAC_Service::SetupJS(JSContext *c, GF_UPnP *upnp, JSObject *parent)
 {
 	m_pCtx = c;
-	m_pObj = JS_NewObject(c, &upnp->upnpDeviceClass, 0, parent);
+	m_pObj = JS_NewObject(c, &upnp->upnpDeviceClass._class, 0, parent);
 	gf_js_add_root(m_pCtx, &m_pObj, GF_JSGC_OBJECT);
 	SMJS_SET_PRIVATE(c, m_pObj, this);
 	JS_DefineFunction(c, m_pObj, "SetStateVariable", upnp_service_set_state_variable, 2, 0);
@@ -846,15 +846,15 @@ void GPAC_GenericDevice::DetachJS(JSContext *c)
 #endif
 
 NPT_Result
-GPAC_GenericDevice::SetupServices(PLT_DeviceData& data)
+GPAC_GenericDevice::SetupServices()
 {
 	u32 i, count;
 	count = gf_list_count(m_pServices);
 	for (i=0; i<count; i++) {
 		GPAC_Service *service = (GPAC_Service *)gf_list_get(m_pServices, i);
-	    data.AddService(service);
+		AddService(service);
 	}
-    return NPT_SUCCESS;
+	return NPT_SUCCESS;
 }
 
 
@@ -882,7 +882,7 @@ static JSBool SMJS_FUNCTION(upnp_action_send_reply)
 	SMJS_ARGS
 	GPAC_GenericDevice *device = (GPAC_GenericDevice *)SMJS_GET_PRIVATE(c, obj);
 	if (!device) return JS_FALSE;
-	
+
 	if (argc && JSVAL_IS_OBJECT(argv[0]) ) {
 		JSObject *list = JSVAL_TO_OBJECT(argv[0]);
 		u32 i, count;
@@ -941,21 +941,21 @@ static JSBool SMJS_FUNCTION(upnp_action_send_reply)
 
 
 NPT_Result
-GPAC_GenericDevice::OnAction(PLT_ActionReference&          action, 
-                                const PLT_HttpRequestContext& context)
+GPAC_GenericDevice::OnAction(PLT_ActionReference&          action,
+                             const PLT_HttpRequestContext& context)
 {
-    NPT_COMPILER_UNUSED(context);
+	NPT_COMPILER_UNUSED(context);
 
 #ifdef GPAC_HAS_SPIDERMONKEY
 	gf_mx_p(m_pMutex);
 #endif
 	PLT_ActionDesc &act_desc = action->GetActionDesc();
-        NPT_String name = act_desc.GetName();
+	NPT_String name = act_desc.GetName();
 #ifdef GPAC_HAS_SPIDERMONKEY
 	assert(!m_pSema);
 #endif
 	GF_LOG(GF_LOG_INFO, GF_LOG_NETWORK, ("[UPnP] Action %s called (thread %d)\n", (char *) name, gf_th_id() ));
-	
+
 #ifdef GPAC_HAS_SPIDERMONKEY
 	if (JSVAL_IS_NULL(act_proc)) {
 		gf_mx_v(m_pMutex);
@@ -964,12 +964,12 @@ GPAC_GenericDevice::OnAction(PLT_ActionReference&          action,
 
 	jsval argv[2];
 
-	m_pUPnP->LockJavascript(1);
+	m_pUPnP->LockJavascript(GF_TRUE);
 
-	JSObject *js_action = JS_NewObject(m_pUPnP->m_pJSCtx, &m_pUPnP->upnpDeviceClass, 0, 0);
+	JSObject *js_action = JS_NewObject(m_pUPnP->m_pJSCtx, &m_pUPnP->upnpDeviceClass._class, 0, 0);
 	argv[0] = OBJECT_TO_JSVAL(js_action);
 	SMJS_SET_PRIVATE(m_pUPnP->m_pJSCtx, js_action, this);
-	
+
 	act_ref = action;
 
 	JS_DefineProperty(m_pUPnP->m_pJSCtx, js_action, "Name", STRING_TO_JSVAL( JS_NewStringCopyZ(m_pUPnP->m_pJSCtx, name) ), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT);
@@ -984,10 +984,10 @@ GPAC_GenericDevice::OnAction(PLT_ActionReference&          action,
 	jsval rval;
 	JS_CallFunctionValue(m_pUPnP->m_pJSCtx, obj, act_proc, 1, argv, &rval);
 	SMJS_SET_PRIVATE(m_pUPnP->m_pJSCtx, js_action, NULL);
-	m_pUPnP->LockJavascript(0);
+	m_pUPnP->LockJavascript(GF_FALSE);
 
 	if (JSVAL_IS_INT(rval) && (JSVAL_TO_INT(rval) != 0)) {
-	    action->SetError(JSVAL_TO_INT(rval), "Action Failed");
+		action->SetError(JSVAL_TO_INT(rval), "Action Failed");
 	}
 	/*wait on the semaphore*/
 	if (!gf_sema_wait_for(m_pSema, 10000)) {

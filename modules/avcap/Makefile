@@ -2,7 +2,7 @@ include ../../config.mak
 
 vpath %.c $(SRC_PATH)/modules/avcap
 
-CFLAGS= $(CPPFLAGS) -I"$(SRC_PATH)/include" $(AVCAP_CFLAGS)
+CFLAGS= $(CXXFLAGS) -I"$(SRC_PATH)/include" $(AVCAP_CFLAGS)
 
 ifeq ($(DEBUGBUILD), yes)
 CFLAGS+=-g
@@ -22,14 +22,14 @@ OBJS=avcap.o
 
 SRCS := $(OBJS:.o=.c) 
 
-LIB=gm_avcap.$(DYN_LIB_SUFFIX)
+LIB=gm_avcap$(DYN_LIB_SUFFIX)
 
 
 all: $(LIB)
 
 
 $(LIB): $(OBJS)
-	$(CXX) -w $(SHFLAGS) $(LDFLAGS) -o ../../bin/gcc/$@ $(OBJS) $(LINKLIBS)
+	$(CXX) -w $(SHFLAGS) -o ../../bin/gcc/$@ $(OBJS) $(LINKLIBS) $(LDFLAGS)
 
 clean: 
 	rm -f $(OBJS) ../../bin/gcc/$(LIB)
@@ -43,10 +43,4 @@ depend:
 distclean: clean
 	rm -f Makefile.bak .depend
 
-
-
-# include dependency files if they exist
-#
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+-include .depend

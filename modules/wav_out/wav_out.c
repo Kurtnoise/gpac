@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,16 +11,16 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
- *		
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
  */
 
 
@@ -29,7 +29,7 @@
 
 #define MAX_AUDIO_BUFFER	30
 
-typedef struct 
+typedef struct
 {
 	HWAVEOUT hwo;
 	WAVEHDR wav_hdr[MAX_AUDIO_BUFFER];
@@ -91,15 +91,15 @@ typedef struct
 
 #ifndef _WAVEFORMATEXTENSIBLE_
 typedef struct {
-    WAVEFORMATEX    Format;
-    union {
-        WORD wValidBitsPerSample;       /* bits of precision  */
-        WORD wSamplesPerBlock;          /* valid if wBitsPerSample==0 */
-        WORD wReserved;                 /* If neither applies, set to zero. */
-    } Samples;
-    DWORD           dwChannelMask;      /* which channels are */
-                                        /* present in stream  */
-    GUID            SubFormat;
+	WAVEFORMATEX    Format;
+	union {
+		WORD wValidBitsPerSample;       /* bits of precision  */
+		WORD wSamplesPerBlock;          /* valid if wBitsPerSample==0 */
+		WORD wReserved;                 /* If neither applies, set to zero. */
+	} Samples;
+	DWORD           dwChannelMask;      /* which channels are */
+	/* present in stream  */
+	GUID            SubFormat;
 } WAVEFORMATEXTENSIBLE, *PWAVEFORMATEXTENSIBLE;
 #endif
 
@@ -117,7 +117,7 @@ static GF_Err WAV_Setup(GF_AudioOutput *dr, void *os_handle, u32 num_buffers, u3
 {
 	WAVCTX();
 
-	ctx->force_config = (num_buffers && total_duration) ? 1 : 0;
+	ctx->force_config = (num_buffers && total_duration) ? GF_TRUE : GF_FALSE;
 	ctx->cfg_num_buffers = num_buffers;
 	if (ctx->cfg_num_buffers <= 1) ctx->cfg_num_buffers = 2;
 	ctx->cfg_duration = total_duration;
@@ -126,7 +126,7 @@ static GF_Err WAV_Setup(GF_AudioOutput *dr, void *os_handle, u32 num_buffers, u3
 	return GF_OK;
 }
 
-static void CALLBACK WaveProc(HWAVEOUT hwo, UINT uMsg, DWORD dwInstance, DWORD dwParam1, DWORD dwParam2)
+static void CALLBACK WaveProc(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
 	GF_AudioOutput *dr = (GF_AudioOutput *) dwInstance;
 	WAVCTX();
@@ -134,28 +134,28 @@ static void CALLBACK WaveProc(HWAVEOUT hwo, UINT uMsg, DWORD dwInstance, DWORD d
 	if (uMsg != WOM_DONE) return;
 	if (ctx->exit_request) return;
 	SetEvent(ctx->event);
-} 
+}
 
 
 static void close_waveform(GF_AudioOutput *dr)
 {
 	WAVCTX();
 
-    if (!ctx->event) return;
+	if (!ctx->event) return;
 
 	/*brute-force version, actually much safer on winCE*/
 #ifdef _WIN32_WCE
-	ctx->exit_request = 1;
+	ctx->exit_request = GF_TRUE;
 	SetEvent(ctx->event);
 	waveOutReset(ctx->hwo);
 	waveOutClose(ctx->hwo);
 	if (ctx->wav_buf) gf_free(ctx->wav_buf);
 	ctx->wav_buf = NULL;
-    CloseHandle(ctx->event);
+	CloseHandle(ctx->event);
 	ctx->event = NULL;
-	ctx->exit_request = 0;
+	ctx->exit_request = GF_FALSE;
 #else
-	ctx->exit_request = 1;
+	ctx->exit_request = GF_TRUE;
 	SetEvent(ctx->event);
 	if (ctx->hwo) {
 		u32 i;
@@ -163,10 +163,10 @@ static void close_waveform(GF_AudioOutput *dr)
 		MMRESULT res;
 		/*wait for all buffers to complete, otherwise this locks waveOutReset*/
 		while (1) {
-			not_done = 0;
+			not_done = GF_FALSE;
 			for (i=0 ; i< ctx->num_buffers; i++) {
 				if (! (ctx->wav_hdr[i].dwFlags & WHDR_DONE)) {
-					not_done = 1;
+					not_done = GF_TRUE;
 					break;
 				}
 			}
@@ -182,9 +182,9 @@ static void close_waveform(GF_AudioOutput *dr)
 	}
 	if (ctx->wav_buf) gf_free(ctx->wav_buf);
 	ctx->wav_buf = NULL;
-    CloseHandle(ctx->event);
+	CloseHandle(ctx->event);
 	ctx->event = NULL;
-	ctx->exit_request = 0;
+	ctx->exit_request = GF_FALSE;
 #endif
 }
 
@@ -222,7 +222,7 @@ static GF_Err WAV_ConfigureOutput(GF_AudioOutput *dr, u32 *SampleRate, u32 *NbCh
 	ctx->fmt.wBitsPerSample = *nbBitsPerSample;
 	ctx->fmt.nSamplesPerSec = *SampleRate;
 	ctx->fmt.nBlockAlign = ctx->fmt.wBitsPerSample * ctx->fmt.nChannels / 8;
-	ctx->fmt.nAvgBytesPerSec = *SampleRate * ctx->fmt.nBlockAlign; 
+	ctx->fmt.nAvgBytesPerSec = *SampleRate * ctx->fmt.nBlockAlign;
 	fmt = &ctx->fmt;
 
 #ifdef USE_WAVE_EXT
@@ -247,12 +247,12 @@ static GF_Err WAV_ConfigureOutput(GF_AudioOutput *dr, u32 *SampleRate, u32 *NbCh
 	}
 #endif
 
-	/* Open a waveform device for output using window callback. */ 
+	/* Open a waveform device for output using window callback. */
 	retry = 10;
-	while (retry) {		
-		hr = waveOutOpen((LPHWAVEOUT)&ctx->hwo, WAVE_MAPPER, &ctx->fmt, (DWORD) WaveProc, (DWORD) dr, 
-			CALLBACK_FUNCTION | WAVE_ALLOWSYNC | WAVE_FORMAT_DIRECT
-			);
+	while (retry) {
+		hr = waveOutOpen((LPHWAVEOUT)&ctx->hwo, WAVE_MAPPER, &ctx->fmt, (DWORD_PTR) WaveProc, (DWORD_PTR) dr,
+		                 CALLBACK_FUNCTION | WAVE_ALLOWSYNC | WAVE_FORMAT_DIRECT
+		                );
 
 		if (hr == MMSYSERR_NOERROR) break;
 		/*couldn't open audio*/
@@ -270,18 +270,18 @@ static GF_Err WAV_ConfigureOutput(GF_AudioOutput *dr, u32 *SampleRate, u32 *NbCh
 		ctx->buffer_size = (ctx->fmt.nAvgBytesPerSec * ctx->cfg_duration) / (1000 * ctx->cfg_num_buffers);
 	}
 
-    ctx->event = CreateEvent( NULL, FALSE, FALSE, NULL);
+	ctx->event = CreateEvent( NULL, FALSE, FALSE, NULL);
 
 	/*make sure we're aligned*/
 	while (ctx->buffer_size % ctx->fmt.nBlockAlign) ctx->buffer_size++;
 
-	ctx->wav_buf = gf_malloc(ctx->buffer_size*ctx->num_buffers*sizeof(char));
+	ctx->wav_buf = (char*)gf_malloc(ctx->buffer_size*ctx->num_buffers*sizeof(char));
 	memset(ctx->wav_buf, 0, ctx->buffer_size*ctx->num_buffers*sizeof(char));
 
 	/*setup wave headers*/
 	for (i=0 ; i < ctx->num_buffers; i++) {
 		memset(& ctx->wav_hdr[i], 0, sizeof(WAVEHDR));
-		ctx->wav_hdr[i].dwBufferLength = ctx->buffer_size; 
+		ctx->wav_hdr[i].dwBufferLength = ctx->buffer_size;
 		ctx->wav_hdr[i].lpData = & ctx->wav_buf[i*ctx->buffer_size];
 		ctx->wav_hdr[i].dwFlags = WHDR_DONE;
 		waveOutPrepareHeader(ctx->hwo, &ctx->wav_hdr[i], sizeof(WAVEHDR));
@@ -320,7 +320,7 @@ static void WAV_WriteAudio(GF_AudioOutput *dr)
 			/*fill it*/
 			hdr->dwBufferLength = dr->FillBuffer(dr->audio_renderer, hdr->lpData, ctx->buffer_size);
 			hdr->dwFlags = 0;
-		    hr = waveOutPrepareHeader(ctx->hwo, hdr, sizeof(WAVEHDR));
+			hr = waveOutPrepareHeader(ctx->hwo, hdr, sizeof(WAVEHDR));
 			/*write it*/
 			waveOutWrite(ctx->hwo, hdr, sizeof(WAVEHDR));
 		}
@@ -429,20 +429,19 @@ static u32 WAV_GetTotalBufferTime(GF_AudioOutput *dr)
 
 void *NewWAVRender()
 {
-	WAVContext *ctx;
 	GF_AudioOutput *driv;
-	ctx = gf_malloc(sizeof(WAVContext));
+	WAVContext *ctx = (WAVContext*)gf_malloc(sizeof(WAVContext));
 	memset(ctx, 0, sizeof(WAVContext));
 	ctx->num_buffers = 10;
 	ctx->pan = 50;
 	ctx->vol = 100;
-	driv = gf_malloc(sizeof(GF_AudioOutput));
+	driv = (GF_AudioOutput*)gf_malloc(sizeof(GF_AudioOutput));
 	memset(driv, 0, sizeof(GF_AudioOutput));
 	GF_REGISTER_MODULE_INTERFACE(driv, GF_AUDIO_OUTPUT_INTERFACE, "Windows MME Output", "gpac distribution")
 
 	driv->opaque = ctx;
 
-	driv->SelfThreaded = 0;
+	driv->SelfThreaded = GF_FALSE;
 	driv->Setup = WAV_Setup;
 	driv->Shutdown = WAV_Shutdown;
 	driv->ConfigureOutput = WAV_ConfigureOutput;
@@ -465,24 +464,25 @@ void DeleteWAVRender(void *ifce)
 	gf_free(dr);
 }
 
-GF_EXPORT
-const u32 *QueryInterfaces() 
+GPAC_MODULE_EXPORT
+const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
 		GF_AUDIO_OUTPUT_INTERFACE,
 		0
 	};
-	return si; 
+	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
-	if (InterfaceType == GF_AUDIO_OUTPUT_INTERFACE) return NewWAVRender();
+	if (InterfaceType == GF_AUDIO_OUTPUT_INTERFACE)
+		return (GF_BaseInterface*)NewWAVRender();
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -491,3 +491,5 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 		break;
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( wave_out )

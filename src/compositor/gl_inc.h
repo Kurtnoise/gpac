@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -30,22 +30,26 @@
 #include <windows.h>
 #endif
 
-#ifndef GPAC_DISABLE_3D
-#include <gpac/internal/compositor_dev.h>
 
-#ifdef GPAC_USE_OGL_ES
-
-#ifndef GPAC_FIXED_POINT
-#error "OpenGL ES defined without fixed-point support - unsupported."
+#ifndef _GF_SETUP_H_
+#error "Missing gpac/setup.h include"
 #endif
+
+#ifndef GPAC_DISABLE_3D
+
+#ifdef GPAC_USE_GLES1X
 
 #ifdef GPAC_ANDROID
 #include "GLES/gl.h"
+#elif defined(GPAC_IPHONE)
+#include "OpenGLES/ES1/gl.h"
+#include "OpenGLES/ES1/glext.h"
+#include "glues.h"
 #else
 #include "GLES/egl.h"
 #endif
 
-#ifdef GPAC_HAS_GLU
+#if defined(GPAC_HAS_GLU) && !defined (GPAC_IPHONE)
 /*WARNING - this is NOT a standard include, GLU is not supported by GLES*/
 #include <GLES/glu.h>
 #endif
@@ -70,6 +74,24 @@
 
 
 #define GL_GLEXT_PROTOTYPES
+
+#ifdef GPAC_USE_OGLES1X
+#include <GLES/gl.h>
+#include <GLES/glext.h>
+
+#elif defined(GPAC_USE_GLES2)
+
+#ifdef GPAC_IPHONE
+#include "OpenGLES/ES2/gl.h"
+#include "glues.h"
+#else
+
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#endif
+
+#else
+
 #include <GL/gl.h>
 
 #ifdef GPAC_HAS_GLU
@@ -78,8 +100,10 @@
 
 #endif
 
+#endif
 
-#define GL_CHECK_ERR  {s32 res = glGetError(); if (res) GF_LOG(GF_LOG_ERROR, GF_LOG_MMIO, "GL Error %d file %s line %d\n", res, __FILE__, __LINE__)); }
+
+#define GL_CHECK_ERR  {s32 res = glGetError(); if (res) GF_LOG(GF_LOG_ERROR, GF_LOG_MMIO, ("GL Error %d file %s line %d\n", res, __FILE__, __LINE__)); }
 
 /*macros for GL proto and fun declaration*/
 #ifdef _WIN32_WCE
@@ -94,27 +118,41 @@
 #define GLDECL(ret, funname, args)	\
 typedef ret (GLAPICAST proc_ ## funname)args;	\
 extern proc_ ## funname funname;	\
-
+ 
 #define GLDECL_STATIC(funname) proc_ ## funname funname = NULL
 
 #if defined GPAC_USE_TINYGL
 //no extensions with TinyGL
-#elif defined (GPAC_USE_OGL_ES)
+#elif defined (GPAC_USE_GLES1X)
 //no extensions with OpenGL ES
 #elif defined(WIN32) || defined (GPAC_CONFIG_WIN32)
 #define LOAD_GL_FUNCS
-#define GET_GLFUN(funname) funname = (proc_ ## funname) wglGetProcAddress(#funname) 
+#define GET_GLFUN(funname) funname = (proc_ ## funname) wglGetProcAddress(#funname)
 #elif defined(CONFIG_DARWIN_GL)
 extern void (*glutGetProcAddress(const GLubyte *procname))( void );
-#define GET_GLFUN(funname) funname = (proc_ ## funname) glutGetProcAddress(#funname)  
+#define GET_GLFUN(funname) funname = (proc_ ## funname) glutGetProcAddress(#funname)
 #else
 #define LOAD_GL_FUNCS
 extern void (*glXGetProcAddress(const GLubyte *procname))( void );
-#define GET_GLFUN(funname) funname = (proc_ ## funname) glXGetProcAddress(#funname) 
+#define GET_GLFUN(funname) funname = (proc_ ## funname) glXGetProcAddress(#funname)
+#endif
+
+#ifndef YCBCR_MESA
+#define YCBCR_MESA	0x8757
+#endif
+
+#ifndef YCBCR_422_APPLE
+#define YCBCR_422_APPLE			0x85B9
+#endif
+
+#if defined(GPAC_USE_GLES2)
+#define GL_UNPACK_ROW_LENGTH_EXT            0x0CF2
+#define GL_UNPACK_SKIP_ROWS_EXT             0x0CF3
+#define GL_UNPACK_SKIP_PIXELS_EXT           0x0CF4
 #endif
 
 
-#if !defined(GPAC_USE_OGL_ES) 
+#if !defined(GPAC_USE_GLES1X) && !defined(GPAC_USE_GLES2)
 
 /*redefine all ext needed*/
 
@@ -134,14 +172,6 @@ extern void (*glXGetProcAddress(const GLubyte *procname))( void );
 
 #ifndef GL_RESCALE_NORMAL
 #define GL_RESCALE_NORMAL 0x803A
-#endif
-
-#ifndef YCBCR_MESA
-#define YCBCR_MESA	0x8757
-#endif
-
-#ifndef YCBCR_422_APPLE
-#define YCBCR_422_APPLE			0x85B9
 #endif
 
 #ifndef UNSIGNED_SHORT_8_8_MESA
@@ -168,6 +198,9 @@ extern void (*glXGetProcAddress(const GLubyte *procname))( void );
 #define GL_DISTANCE_ATTENUATION_EXT         0x8129
 #endif
 
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
 
 #ifndef GL_VERSION_1_3
 
@@ -313,6 +346,7 @@ GLDECL(void, glPointParameterfv, (GLenum, const GLfloat *) )
 #endif
 
 #define GL_ARRAY_BUFFER	0x8892
+#define GL_ELEMENT_ARRAY_BUFFER	0x8893
 #define GL_STREAM_DRAW	0x88E0
 #define GL_STATIC_DRAW	0x88E4
 #define GL_DYNAMIC_DRAW 0x88E8
@@ -322,6 +356,8 @@ GLDECL(void, glDeleteBuffers, (GLsizei , GLuint *) )
 GLDECL(void, glBindBuffer, (GLenum, GLuint ) )
 GLDECL(void, glBufferData, (GLenum, int, void *, GLenum) )
 GLDECL(void, glBufferSubData, (GLenum, int, int, void *) )
+GLDECL(void *, glMapBuffer, (GLenum, GLenum) )
+GLDECL(void *, glUnmapBuffer, (GLenum) )
 
 #endif	//GL_VERSION_1_5
 
@@ -415,6 +451,10 @@ GLDECL(void, glBufferSubData, (GLenum, int, int, void *) )
 #define GL_STENCIL_BACK_REF 0x8CA3
 #define GL_STENCIL_BACK_VALUE_MASK 0x8CA4
 #define GL_STENCIL_BACK_WRITEMASK 0x8CA5
+#define GL_PIXEL_UNPACK_BUFFER_ARB   0x88EC
+#define GL_STREAM_DRAW_ARB   0x88E0
+#define GL_WRITE_ONLY_ARB   0x88B9
+#define GL_DYNAMIC_DRAW_ARB   0x88E8
 
 
 GLDECL(GLuint, glCreateProgram, (void) )
@@ -455,14 +495,22 @@ GLDECL(void, glUniformMatrix2x4fv, (GLint location, GLsizei count, GLboolean tra
 GLDECL(void, glUniformMatrix4x2fv, (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) )
 GLDECL(void, glUniformMatrix3x4fv, (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) )
 GLDECL(void, glUniformMatrix4x3fv, (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) )
+GLDECL(void, glGetProgramiv, (GLuint program, GLenum pname, GLint *params) )
+GLDECL(void, glGetProgramInfoLog, (GLuint program,  GLsizei maxLength,  GLsizei *length,  char *infoLog) )
 
+#ifndef GPAC_ANDROID
+GLDECL(void, glEnableVertexAttribArray, (GLuint index) )
+GLDECL(void, glDisableVertexAttribArray, (GLuint index) )
+GLDECL(void, glVertexAttribPointer, (GLuint  index,  GLint  size,  GLenum  type,  GLboolean  normalized,  GLsizei  stride,  const GLvoid *  pointer) )
+GLDECL(void, glVertexAttribIPointer, (GLuint  index,  GLint  size,  GLenum  type,  GLsizei  stride,  const GLvoid *  pointer) )
+GLDECL(GLint, glGetAttribLocation, (GLuint prog, const char *name) )
+#endif
 
 
 #endif //GL_VERSION_2_0
 
-#endif //GPAC_USE_OGL_ES 
+#endif //GPAC_USE_GLES1X || GPAC_USE_GLES2
 
 #endif	/*GPAC_DISABLE_3D*/
 
 #endif	/*_GL_INC_H_*/
-

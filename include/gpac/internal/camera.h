@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -58,8 +58,10 @@ enum
 {
 	/*headlight is on*/
 	NAV_HEADLIGHT = 1,
+	/*navigtion is selectable*/
+	NAV_SELECTABLE = 1<<1,
 	/*any navigation (eg, user-interface navigation control allowed)*/
-	NAV_ANY = 1<<1
+	NAV_ANY = 1<<2
 };
 
 /*frustum object*/
@@ -97,7 +99,7 @@ typedef struct _camera
 	u32 flags;
 
 	/*viewport info*/
-	GF_Rect vp;
+	GF_Rect vp, proj_vp;
 	/*not always same as VP due to aspect ratio*/
 	Fixed width, height;
 	Fixed z_near, z_far;
@@ -131,7 +133,8 @@ typedef struct _camera
 	u32 navigation_flags, navigate_mode;
 	SFVec3f avatar_size;
 	Fixed visibility, speed;
-	Bool had_viewpoint, had_nav_info;
+	Bool had_nav_info;
+	u32 had_viewpoint;
 
 	/*last camera position before collision& gravity detection*/
 	SFVec3f last_pos;
@@ -168,7 +171,9 @@ typedef struct _camera
 /*invalidate camera to force recompute of all params*/
 void camera_invalidate(GF_Camera *cam);
 /*updates camera. user transform is only used in 2D to set global user zoom/pan/translate*/
-void camera_update(GF_Camera *cam, GF_Matrix2D *user_transform, Bool center_coords, Fixed horizontal_shift, Fixed viewing_distance, Fixed view_distance_offset, u32 camera_layout);
+void camera_update(GF_Camera *cam, GF_Matrix2D *user_transform, Bool center_coords);
+/*updates camera. user transform is only used in 2D to set global user zoom/pan/translate + stereo param*/
+void camera_update_stereo(GF_Camera *cam, GF_Matrix2D *user_transform, Bool center_coords, Fixed horizontal_shift, Fixed viewing_distance, Fixed viewing_distance_offset, u32 camera_layout);
 /*reset to last viewport*/
 void camera_reset_viewpoint(GF_Camera *cam, Bool animate);
 /*move camera to given vp*/

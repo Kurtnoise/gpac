@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -56,7 +56,7 @@ static void clean_paths(FSStack *stack)
 {
 	/*delete all path objects*/
 	while (gf_list_count(stack->items)) {
-		FSItem *it = gf_list_get(stack->items, 0);
+		FSItem *it = (FSItem*)gf_list_get(stack->items, 0);
 		gf_list_rem(stack->items, 0);
 		if (it->path) gf_path_del(it->path);
 #ifndef GPAC_DISABLE_3D
@@ -70,6 +70,7 @@ static FSItem *new_fs_item(FSStack *st, u32 line_col, u32 fill_col, Fixed width)
 {
 	FSItem *item;
 	GF_SAFEALLOC(item, FSItem);
+	if (!item) return NULL;
 	gf_list_add(st->items, item);
 	item->fill_col = fill_col;
 	item->width = width;
@@ -90,28 +91,28 @@ static void build_shape(FSStack *st, GF_Node *node)
 	u32 wi, li, fi, ci, command, i, has_ci;
 	FSItem *fill_item, *line_item;
 	Fixed w;
-	SFVec2f cur, pt, ct1={0,0}, ct2, *pts;
+	SFVec2f cur, pt, ct1= {0,0}, ct2, *pts;
 	GF_Rect rc;
 	u32 line_col, fill_col;
 	Bool need_line, need_fill;
 
 	/*get all fields*/
 	gf_node_get_field(node, 0, &field);
-	coords = field.far_ptr;
+	coords = (MFVec2f*)field.far_ptr;
 	gf_node_get_field(node, 1, &field);
-	com = field.far_ptr;
+	com = (MFInt32*)field.far_ptr;
 	gf_node_get_field(node, 2, &field);
-	widths = field.far_ptr;
+	widths = (MFFloat*)field.far_ptr;
 	gf_node_get_field(node, 3, &field);
-	colors = field.far_ptr;
+	colors = (MFColor*)field.far_ptr;
 	gf_node_get_field(node, 4, &field);
-	widthIndex = field.far_ptr;
+	widthIndex = (MFInt32*)field.far_ptr;
 	gf_node_get_field(node, 5, &field);
-	lineIndex = field.far_ptr;
+	lineIndex = (MFInt32*)field.far_ptr;
 	gf_node_get_field(node, 6, &field);
-	fillIndex = field.far_ptr;
+	fillIndex = (MFInt32*)field.far_ptr;
 	gf_node_get_field(node, 7, &field);
-	coordIndex = field.far_ptr;
+	coordIndex = (MFInt32*)field.far_ptr;
 
 	wi = li = fi = ci = 0;
 	w = 0;
@@ -119,7 +120,7 @@ static void build_shape(FSStack *st, GF_Node *node)
 	st->max_width = 0;
 	cur.x = cur.y = 0;
 	fill_item = line_item = NULL;
-	need_line = need_fill = 0;
+	need_line = need_fill = GF_FALSE;
 	cur.x = cur.y = 0;
 	has_ci = coordIndex->count ? 1 : 0;
 	pts = coords->vals;
@@ -127,39 +128,39 @@ static void build_shape(FSStack *st, GF_Node *node)
 
 	/*implicit commands: 0 1 2 3*/
 
-/*
-	if (widthIndex->count) {
-		w = (widthIndex->vals[wi]==-1) ? 0 : widths->vals[widthIndex->vals[wi]];
-		if (!w) {
-			need_line = 0;
-			line_item = NULL;
-		} else {
-			need_line = 1;
-			if (st->max_width<w) st->max_width = w;
+	/*
+		if (widthIndex->count) {
+			w = (widthIndex->vals[wi]==-1) ? 0 : widths->vals[widthIndex->vals[wi]];
+			if (!w) {
+				need_line = 0;
+				line_item = NULL;
+			} else {
+				need_line = 1;
+				if (st->max_width<w) st->max_width = w;
+			}
+			wi++;
 		}
-		wi++;
-	}
-	if (lineIndex->count) {
-		if (w) {
-			line_col = SFCOL_MAKE_ARGB(colors->vals[lineIndex->vals[li]]);
-			need_line = 1;
+		if (lineIndex->count) {
+			if (w) {
+				line_col = SFCOL_MAKE_ARGB(colors->vals[lineIndex->vals[li]]);
+				need_line = 1;
+			}
+			li++;
 		}
-		li++;
-	}
-	if (fillIndex->count) {
-		if (fillIndex->vals[fi]==-1) {
-			fill_col = 0;
-			fill_item = NULL;
-		} else {
-			fill_col = SFCOL_MAKE_ARGB(colors->vals[fillIndex->vals[fi]]);
-			need_fill = 1;
+		if (fillIndex->count) {
+			if (fillIndex->vals[fi]==-1) {
+				fill_col = 0;
+				fill_item = NULL;
+			} else {
+				fill_col = SFCOL_MAKE_ARGB(colors->vals[fillIndex->vals[fi]]);
+				need_fill = 1;
+			}
+			fi++;
 		}
-		fi++;
-	}
-	if (!coordIndex->count) return;
-	cur = coords->vals[coordIndex->vals[ci]];
-	ci++;
-*/
+		if (!coordIndex->count) return;
+		cur = coords->vals[coordIndex->vals[ci]];
+		ci++;
+	*/
 
 	for (command=0; command<com->count; command++) {
 		switch (com->vals[command]) {
@@ -167,10 +168,10 @@ static void build_shape(FSStack *st, GF_Node *node)
 		case 0:
 			if (wi >= widthIndex->count) return;
 			w = (widthIndex->vals[wi]==-1) ? 0 : widths->vals[widthIndex->vals[wi]];
-			if (!w) 
+			if (!w)
 				line_item = NULL;
 			else {
-				need_line = 1;
+				need_line = GF_TRUE;
 				if (st->max_width<w) st->max_width = w;
 			}
 			wi++;
@@ -180,7 +181,7 @@ static void build_shape(FSStack *st, GF_Node *node)
 			if (li > lineIndex->count) return;
 			if (w) {
 				line_col = SFCOL_MAKE_ARGB(colors->vals[lineIndex->vals[li]]);
-				need_line = 1;
+				need_line = GF_TRUE;
 			}
 			li++;
 			break;
@@ -192,7 +193,7 @@ static void build_shape(FSStack *st, GF_Node *node)
 				fill_item = NULL;
 			} else {
 				fill_col = SFCOL_MAKE_ARGB(colors->vals[fillIndex->vals[fi]]);
-				need_fill = 1;
+				need_fill = GF_TRUE;
 			}
 			fi++;
 			break;
@@ -201,11 +202,11 @@ static void build_shape(FSStack *st, GF_Node *node)
 			if ((has_ci && ci >= coordIndex->count) || (!has_ci && ci >= coords->count) ) return;
 			if (need_fill) {
 				fill_item = new_fs_item(st, 0, fill_col, 0);
-				need_fill = 0;
+				need_fill = GF_FALSE;
 			}
 			if (need_line) {
 				line_item = new_fs_item(st, line_col, 0, w);
-				need_line = 0;
+				need_line = GF_FALSE;
 			}
 			if (has_ci) {
 				pt = pts[coordIndex->vals[ci]];
@@ -224,12 +225,12 @@ static void build_shape(FSStack *st, GF_Node *node)
 			if (need_fill) {
 				fill_item = new_fs_item(st, 0, fill_col, 0);
 				gf_path_add_move_to(fill_item->path, cur.x, cur.y);
-				need_fill = 0;
+				need_fill = GF_FALSE;
 			}
 			if (need_line) {
 				line_item = new_fs_item(st, line_col, 0, w);
 				gf_path_add_move_to(line_item->path, cur.x, cur.y);
-				need_line = 0;
+				need_line = GF_FALSE;
 			}
 			if (has_ci) {
 				pt = pts[coordIndex->vals[ci]];
@@ -247,12 +248,12 @@ static void build_shape(FSStack *st, GF_Node *node)
 			if (need_fill) {
 				fill_item = new_fs_item(st, 0, fill_col, 0);
 				gf_path_add_move_to(fill_item->path, cur.x, cur.y);
-				need_fill = 0;
+				need_fill = GF_FALSE;
 			}
 			if (need_line) {
 				line_item = new_fs_item(st, line_col, 0, w);
 				gf_path_add_move_to(line_item->path, cur.x, cur.y);
-				need_line = 0;
+				need_line = GF_FALSE;
 			}
 			if (has_ci) {
 				ct1 = pts[coordIndex->vals[ci]];
@@ -275,12 +276,12 @@ static void build_shape(FSStack *st, GF_Node *node)
 			if (need_fill) {
 				fill_item = new_fs_item(st, 0, fill_col, 0);
 				gf_path_add_move_to(fill_item->path, cur.x, cur.y);
-				need_fill = 0;
+				need_fill = GF_FALSE;
 			}
 			if (need_line) {
 				line_item = new_fs_item(st, line_col, 0, w);
 				gf_path_add_move_to(line_item->path, cur.x, cur.y);
-				need_line = 0;
+				need_line = GF_FALSE;
 			}
 			ct1.x = 2*cur.x - ct1.x;
 			ct1.y = 2*cur.y - ct1.y;
@@ -303,12 +304,12 @@ static void build_shape(FSStack *st, GF_Node *node)
 			if (need_fill) {
 				fill_item = new_fs_item(st, 0, fill_col, 0);
 				gf_path_add_move_to(fill_item->path, cur.x, cur.y);
-				need_fill = 0;
+				need_fill = GF_FALSE;
 			}
 			if (need_line) {
 				line_item = new_fs_item(st, line_col, 0, w);
 				gf_path_add_move_to(line_item->path, cur.x, cur.y);
-				need_line = 0;
+				need_line = GF_FALSE;
 			}
 			if (has_ci) {
 				ct1 = pts[coordIndex->vals[ci]];
@@ -328,12 +329,12 @@ static void build_shape(FSStack *st, GF_Node *node)
 			if (need_fill) {
 				fill_item = new_fs_item(st, 0, fill_col, 0);
 				gf_path_add_move_to(fill_item->path, cur.x, cur.y);
-				need_fill = 0;
+				need_fill = GF_FALSE;
 			}
 			if (need_line) {
 				line_item = new_fs_item(st, line_col, 0, w);
 				gf_path_add_move_to(line_item->path, cur.x, cur.y);
-				need_line = 0;
+				need_line = GF_FALSE;
 			}
 			ct1.x = 2*cur.x - ct1.x;
 			ct1.y = 2*cur.y - ct1.y;
@@ -354,11 +355,11 @@ static void build_shape(FSStack *st, GF_Node *node)
 			break;
 		}
 	}
-	
+
 	/*compute bounds*/
 	st->bounds.width = st->bounds.height = 0;
 	for (i=0; i<gf_list_count(st->items); i++) {
-		line_item = gf_list_get(st->items, i);
+		line_item = (FSItem*)gf_list_get(st->items, i);
 		gf_path_get_bounds(line_item->path, &rc);
 		gf_rect_union(&st->bounds, &rc);
 	}
@@ -390,7 +391,7 @@ static void fs_traverse(GF_Node *node, void *rs, Bool is_destroy)
 	case TRAVERSE_DRAW_2D:
 		ctx = tr_state->ctx;
 		for (i=0; i<gf_list_count(st->items); i++) {
-			FSItem *item = gf_list_get(st->items, i);
+			FSItem *item = (FSItem*)gf_list_get(st->items, i);
 			ctx->flags &= ~(CTX_PATH_FILLED | CTX_PATH_STROKE);
 			memset(&ctx->aspect, 0, sizeof(DrawAspect2D));
 			if (item->fill_col) {
@@ -408,7 +409,7 @@ static void fs_traverse(GF_Node *node, void *rs, Bool is_destroy)
 	case TRAVERSE_DRAW_3D:
 		ctx = tr_state->ctx;
 		for (i=0; i<gf_list_count(st->items); i++) {
-			FSItem *item = gf_list_get(st->items, i);
+			FSItem *item = (FSItem*)gf_list_get(st->items, i);
 			memset(&ctx->aspect, 0, sizeof(DrawAspect2D));
 			if (item->fill_col) {
 				ctx->aspect.fill_color = item->fill_col;
@@ -438,7 +439,11 @@ static void fs_traverse(GF_Node *node, void *rs, Bool is_destroy)
 		if (tr_state->visual->type_3d) return;
 #endif
 		/*finalize*/
+#ifndef GPAC_DISABLE_VRML
 		ctx = drawable_init_context_mpeg4(st->drawable, tr_state);
+#else
+		ctx = NULL;
+#endif
 		if (!ctx) return;
 
 		/*force width to max width used for clipper compute*/
@@ -456,6 +461,10 @@ void compositor_init_hc_flashshape(GF_Compositor *compositor, GF_Node *node)
 	FSStack *stack;
 
 	GF_SAFEALLOC(stack, FSStack);
+	if (!stack) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate flashshape proto stack\n"));
+		return;
+	}
 	stack->drawable = drawable_new();
 	stack->drawable->node = node;
 	stack->drawable->flags = DRAWABLE_USE_TRAVERSE_DRAW;

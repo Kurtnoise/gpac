@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2000-2012
+ *			Copyright (c) Telecom ParisTech 2000-2019
  *					All rights reserved
  *
  *			Authors: Jean Le Feuvre
@@ -13,15 +13,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -37,6 +37,12 @@
 #include <gpac/rtp_streamer.h>
 #endif
 
+#include <gpac/mpegts.h>
+
+#ifndef GPAC_DISABLE_STREAMING
+#include <gpac/internal/ietf_dev.h>
+#endif
+
 #if defined(GPAC_DISABLE_ISOM) || defined(GPAC_DISABLE_ISOM_WRITE)
 
 #error "Cannot compile MP4Box if GPAC is not built with ISO File Format support"
@@ -48,84 +54,117 @@
 void PrintStreamerUsage()
 {
 	fprintf(stderr, "File Streamer Options\n"
-			"\n"
-			"MP4Box can stream ISO files to RTP. The streamer currently doesn't support\n"
-			"data carrouselling and will therefore not handle BIFS and OD streams properly.\n"
-			"\n"
-			"-rtp         enables streamer\n"
-			"-noloop      disables looping when streaming\n"
-			"-mpeg4       forces MPEG-4 ES Generic for all RTP streams\n"
-			"-dst=IP      IP destination (uni/multi-cast). Default: 127.0.0.1\n"
-			"-port=PORT   output port of the first stream. Default: 7000\n"
-			"-mtu=MTU     path MTU for RTP packets. Default is 1450 bytes\n"
-			"-ifce=IFCE   IP address of the physical interface to use. Default: NULL (ANY)\n"
-			"-ttl=TTL     time to live for multicast packets. Default: 1\n"
-			"-sdp=Name    file name of the generated SDP. Default: \"session.sdp\"\n"
-			"\n"
-		);
+	        "\n"
+	        "MP4Box can stream ISO files to RTP. The streamer currently doesn't support\n"
+	        "data carrouselling and will therefore not handle BIFS and OD streams properly.\n"
+	        "\n"
+            "-rtp         enables streamer\n"
+            "-run-for=T   runs for T seconds of the media then exits\n"
+	        "-noloop      disables looping when streaming\n"
+	        "-mpeg4       forces MPEG-4 ES Generic for all RTP streams\n"
+	        "-dst=IP      IP destination (uni/multi-cast). Default: 127.0.0.1\n"
+	        "-port=PORT   output port of the first stream. Default: 7000\n"
+	        "-mtu=MTU     path MTU for RTP packets. Default is 1450 bytes\n"
+	        "-ifce=IFCE   IP address of the physical interface to use. Default: NULL (ANY)\n"
+	        "-ttl=TTL     time to live for multicast packets. Default: 1\n"
+	        "-sdp=Name    file name of the generated SDP. Default: \"session.sdp\"\n"
+	        "\n"
+	       );
 }
 
-int stream_file_rtp(int argc, char **argv) 
+static void on_logs(void *cbk, GF_LOG_Level ll, GF_LOG_Tool lm, const char *fmt, va_list list)
+{
+	FILE *logs = (FILE*)cbk;
+	vfprintf(logs, fmt, list);
+	fflush(logs);
+}
+
+int stream_file_rtp(int argc, char **argv)
 {
 	GF_ISOMRTPStreamer *file_streamer;
 	char *sdp_file = "session.sdp";
 	char *ip_dest = "127.0.0.1";
 	char *ifce_addr = NULL;
 	char *inName = NULL;
+	char *logs=NULL;
+	FILE *logfile=NULL;
 	u16 port = 7000;
 	u32 ttl = 1;
-	Bool loop = 1;
-	Bool force_mpeg4 = 0;
-	u32 path_mtu = 1450;
+	Bool loop = GF_TRUE;
+    GF_MemTrackerType mem_track = GF_MemTrackerNone;
+	Bool force_mpeg4 = GF_FALSE;
+    u32 path_mtu = 1450;
+    Double run_for = -1.0;
 	u32 i;
 
 	for (i = 1; i < (u32) argc ; i++) {
 		char *arg = argv[i];
 
 		if (arg[0] != '-') {
-			if (inName) { fprintf(stderr, "Error - 2 input names specified, please check usage\n"); return 1; }
+			if (inName) {
+				fprintf(stderr, "Error - 2 input names specified, please check usage\n");
+				return 1;
+			}
 			inName = arg;
 		}
-		else if (!stricmp(arg, "-noloop")) loop = 0;
-		else if (!stricmp(arg, "-mpeg4")) force_mpeg4 = 1;
+		else if (!stricmp(arg, "-noloop")) loop = GF_FALSE;
+		else if (!stricmp(arg, "-mpeg4")) force_mpeg4 = GF_TRUE;
 		else if (!strnicmp(arg, "-port=", 6)) port = atoi(arg+6);
 		else if (!strnicmp(arg, "-mtu=", 5)) path_mtu = atoi(arg+5);
 		else if (!strnicmp(arg, "-dst=", 5)) ip_dest = arg+5;
 		else if (!strnicmp(arg, "-ttl=", 5)) ttl = atoi(arg+5);
 		else if (!strnicmp(arg, "-ifce=", 6)) ifce_addr = arg+6;
 		else if (!strnicmp(arg, "-sdp=", 5)) sdp_file = arg+5;
+        else if (!stricmp(arg, "-mem-track")) mem_track = GF_MemTrackerSimple;
+        else if (!stricmp(arg, "-mem-track-stack")) mem_track = GF_MemTrackerBackTrace;
+		else if (!strnicmp(arg, "-logs=", 6)) logs = arg+6;
+		else if (!strnicmp(arg, "-lf=", 4)) logfile = gf_fopen(arg+4, "wt");
+        else if (!strnicmp(arg, "-run-for=", 9)) run_for = atof(arg+9);
+	}
+
+	gf_sys_init(mem_track);
+	if (logs)
+		gf_log_set_tools_levels(logs);
+	else
+		gf_log_set_tool_level(GF_LOG_RTP, GF_LOG_INFO); //set to debug to have packet list
+	if (logfile) {
+		gf_log_set_callback(logfile, on_logs);
 	}
 
 	if (!gf_isom_probe_file(inName)) {
 		fprintf(stderr, "File %s is not a valid ISO Media file and cannot be streamed\n", inName);
+		if (logfile) gf_fclose(logfile);
+		gf_sys_close();
 		return 1;
 	}
-
-	gf_sys_init(0);
-
-	gf_log_set_tool_level(GF_LOG_RTP, GF_LOG_WARNING);	//set to debug to have packet list
 
 	file_streamer = gf_isom_streamer_new(inName, ip_dest, port, loop, force_mpeg4, path_mtu, ttl, ifce_addr);
 	if (!file_streamer) {
 		fprintf(stderr, "Cannot create file streamer\n");
 	} else {
+        Bool run = GF_TRUE;
 		u32 check = 50;
 		fprintf(stderr, "Starting streaming %s to %s:%d\n", inName, ip_dest, port);
 		gf_isom_streamer_write_sdp(file_streamer, sdp_file);
 
-		while (1) {
+        if (run_for==0) run=GF_FALSE;
+
+		while (run) {
 			gf_isom_streamer_send_next_packet(file_streamer, 0, 0);
 			check--;
 			if (!check) {
 				if (gf_prompt_has_input()) {
-					char c = (char) gf_prompt_get_char(); 
+					char c = (char) gf_prompt_get_char();
 					if (c=='q') break;
 				}
 				check = 50;
 			}
+            if ((run_for > 0) && (run_for < gf_isom_streamer_get_current_time(file_streamer)) )
+                break;
 		}
 		gf_isom_streamer_del(file_streamer);
 	}
+	if (logfile) gf_fclose(logfile);
 	gf_sys_close();
 	return 0;
 }
@@ -133,37 +172,37 @@ int stream_file_rtp(int argc, char **argv)
 
 void PrintLiveUsage()
 {
-	fprintf(stderr, 
+	fprintf(stderr,
 
-		"Live scene encoder options:\n"
-		"-dst=IP    destination IP - default: NULL\n"
-		"-port=PORT destination port - default: 7000\n"
-		"-mtu=MTU   path MTU for RTP packets. Default is 1450 bytes\n"
-		"-ifce=IFCE IP address of the physical interface to use. Default: NULL(ANY)\n"
-		"-ttl=TTL   time to live for multicast packets. Default: 1\n"
-		"-sdp=Name  ouput SDP file - default: session.sdp\n"
-		"\n"
-		"-dims      turns on DIMS mode for SVG input - default: off\n"
-		"-no-rap    disabled RAP sending - this also disables carousel generation. Default: off\n"
-		"-src=file  source of updates - default: null\n"
-		"-rap=time  duration in ms of base carousel - default: 0 (off)\n"
-		"            you can specify the RAP period of a single ESID (not in DIMS):\n"
-		"                -rap=ESID=X:time\n"
-		"\n"
-		"Runtime options:\n"
-		"q:         quits\n"
-		"u:         inputs some commands to be sent\n"
-		"U:         same as u but signals the updates as critical\n"
-		"e:         inputs some commands to be sent without being aggregated\n"
-		"E:         same as e but signals the updates as critical\n"
-		"f:         forces RAP sending\n"
-		"F:         forces RAP regeneration and sending\n"
-		"p:         dumps current scene\n"
-		"\n"
-		"GPAC version: " GPAC_FULL_VERSION "\n"
-		"");
+	        "Live scene encoder options:\n"
+	        "-dst=IP    destination IP - default: NULL\n"
+	        "-port=PORT destination port - default: 7000\n"
+	        "-mtu=MTU   path MTU for RTP packets. Default is 1450 bytes\n"
+	        "-ifce=IFCE IP address of the physical interface to use. Default: NULL(ANY)\n"
+	        "-ttl=TTL   time to live for multicast packets. Default: 1\n"
+	        "-sdp=Name  ouput SDP file - default: session.sdp\n"
+	        "\n"
+	        "-dims      turns on DIMS mode for SVG input - default: off\n"
+	        "-no-rap    disabled RAP sending - this also disables carousel generation. Default: off\n"
+	        "-src=file  source of updates - default: null\n"
+	        "-rap=time  duration in ms of base carousel - default: 0 (off)\n"
+	        "            you can specify the RAP period of a single ESID (not in DIMS):\n"
+	        "                -rap=ESID=X:time\n"
+	        "\n"
+	        "Runtime options:\n"
+	        "q:         quits\n"
+	        "u:         inputs some commands to be sent\n"
+	        "U:         same as u but signals the updates as critical\n"
+	        "e:         inputs some commands to be sent without being aggregated\n"
+	        "E:         same as e but signals the updates as critical\n"
+	        "f:         forces RAP sending\n"
+	        "F:         forces RAP regeneration and sending\n"
+	        "p:         dumps current scene\n"
+	        "\n"
+	        "GPAC version: " GPAC_FULL_VERSION "\n"
+	        "");
 }
-typedef struct 
+typedef struct
 {
 	GF_RTPStreamer *rtp;
 	Bool manual_rtcp;
@@ -181,7 +220,7 @@ typedef struct
 	u32 critical;
 } RTPChannel;
 
-typedef struct 
+typedef struct
 {
 	GF_SceneEngine *seng;
 	Bool force_carousel, carousel_generation;
@@ -202,7 +241,7 @@ RTPChannel *next_carousel(LiveSession *sess, u32 *timeout)
 	time = (u32) -1;
 	count = gf_list_count(sess->streams);
 	for (i=0; i<count; i++) {
-		RTPChannel *ch = gf_list_get(sess->streams, i);
+		RTPChannel *ch = (RTPChannel*)gf_list_get(sess->streams, i);
 		if (!ch->carousel_period) continue;
 		if (!ch->carousel_size) continue;
 
@@ -232,9 +271,9 @@ static void live_session_callback(void *calling_object, u16 ESID, char *data, u3
 	RTPChannel *rtpch;
 	u32 i=0;
 
-	while ( (rtpch = gf_list_enum(livesess->streams, &i))) {
+	while ( (rtpch = (RTPChannel*)gf_list_enum(livesess->streams, &i))) {
 		if (rtpch->ESID == ESID) {
-			
+
 			/*store carousel data*/
 			if (livesess->carousel_generation && rtpch->carousel_period) {
 				if (rtpch->carousel_alloc < size) {
@@ -261,7 +300,7 @@ static void live_session_callback(void *calling_object, u16 ESID, char *data, u3
 				fprintf(stderr, "Stream %d: Sending update at TS "LLD", %d bytes - RAP %d - critical %d\n", ESID, ts, size, rap, critical);
 				rtpch->rap = rtpch->critical = 0;
 
-				if (rtpch->manual_rtcp) gf_rtp_streamer_send_rtcp(rtpch->rtp, 0, 0);
+				if (rtpch->manual_rtcp) gf_rtp_streamer_send_rtcp(rtpch->rtp, 0, 0, 0, 0, 0);
 			}
 			return;
 		}
@@ -282,7 +321,7 @@ static void live_session_send_carousel(LiveSession *livesess, RTPChannel *ch)
 
 			if (ch->manual_rtcp) {
 				ts = ch->carousel_ts + ch->timescale * ( gf_sys_clock() - ch->init_time + ch->ts_delta)/1000;
-				gf_rtp_streamer_send_rtcp(ch->rtp, 1, (u32) ts);
+				gf_rtp_streamer_send_rtcp(ch->rtp, 1, (u32) ts, 0, 0, 0);
 			}
 		}
 	} else {
@@ -300,7 +339,7 @@ static void live_session_send_carousel(LiveSession *livesess, RTPChannel *ch)
 
 				if (ch->manual_rtcp) {
 					ts = ch->carousel_ts + ch->timescale*(gf_sys_clock()-ch->init_time + ch->ts_delta)/1000;
-					gf_rtp_streamer_send_rtcp(ch->rtp, 1, (u32) ts);
+					gf_rtp_streamer_send_rtcp(ch->rtp, 1, (u32) ts, 0, 0, 0);
 				}
 			}
 		}
@@ -324,15 +363,19 @@ static void live_session_setup(LiveSession *livesess, char *ip, u16 port, u32 pa
 		gf_seng_get_stream_config(livesess->seng, i, &ESID, &config, &config_len, &st, &oti, &ts);
 
 		GF_SAFEALLOC(rtpch, RTPChannel);
+		if (!rtpch) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("Cannot allocate rtp input handler\n"));
+			continue;
+		}
 		rtpch->timescale = ts;
 		rtpch->init_time = gf_sys_clock();
 
 		switch (st) {
 		case GF_STREAM_OD:
 		case GF_STREAM_SCENE:
-			rtpch->rtp = gf_rtp_streamer_new_extended(st, oti, ts, ip, port, path_mtu, ttl, ifce_addr, 
-								 GP_RTP_PCK_SYSTEMS_CAROUSEL, (char *) config, config_len,
-								 96, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4);
+			rtpch->rtp = gf_rtp_streamer_new_extended(st, oti, ts, ip, port, path_mtu, ttl, ifce_addr,
+			             GP_RTP_PCK_SYSTEMS_CAROUSEL, (char *) config, config_len,
+			             96, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4);
 
 			if (rtpch->rtp) {
 				gf_rtp_streamer_disable_auto_rtcp(rtpch->rtp);
@@ -354,12 +397,12 @@ static void live_session_setup(LiveSession *livesess, char *ip, u16 port, u32 pa
 
 		port += 2;
 	}
-    if (sdp) {
-		FILE *out = gf_f64_open(sdp_name, "wt");
-        fprintf(out, "%s", sdp);
-		fclose(out);
-	    gf_free(sdp);
-    }
+	if (sdp) {
+		FILE *out = gf_fopen(sdp_name, "wt");
+		fprintf(out, "%s", sdp);
+		gf_fclose(out);
+		gf_free(sdp);
+	}
 }
 
 void live_session_shutdown(LiveSession *livesess)
@@ -429,7 +472,7 @@ static RTPChannel *set_broadcast_params(LiveSession *livesess, u16 esid, u32 per
 int live_session(int argc, char **argv)
 {
 	GF_Err e;
-	int i;
+	u32 i;
 	char *filename = NULL;
 	char *dst = NULL;
 	char *ifce_addr = NULL;
@@ -443,9 +486,9 @@ int live_session(int argc, char **argv)
 	u64 last_src_modif, mod_time;
 	char *src_name = NULL;
 	Bool run, has_carousel, no_rap;
-    Bool udp = 0;
+	Bool udp = 0;
 	u16 sk_port=0;
-    GF_Socket *sk = NULL;
+	GF_Socket *sk = NULL;
 	LiveSession livesess;
 	RTPChannel *ch;
 	char *update_buffer = NULL;
@@ -459,13 +502,13 @@ int live_session(int argc, char **argv)
 	aggregate_au = 1;
 	es_id = 0;
 	no_rap = 0;
-	gf_sys_init(0);
+	gf_sys_init(GF_MemTrackerNone);
 
 	memset(&livesess, 0, sizeof(LiveSession));
-	
+
 	gf_log_set_tool_level(GF_LOG_ALL, GF_LOG_INFO);
 
-	for (i=1; i<argc; i++) {
+	for (i=1; i<(u32) argc; i++) {
 		char *arg = argv[i];
 		if (arg[0] != '-') filename = arg;
 		else if (!strnicmp(arg, "-dst=", 5)) dst = arg+5;
@@ -474,11 +517,17 @@ int live_session(int argc, char **argv)
 		else if (!strnicmp(arg, "-mtu=", 5)) path_mtu = atoi(arg+5);
 		else if (!strnicmp(arg, "-ttl=", 5)) ttl = atoi(arg+5);
 		else if (!strnicmp(arg, "-ifce=", 6)) ifce_addr = arg+6;
-        else if (!strnicmp(arg, "-no-rap", 7)) no_rap = 1;
+		else if (!strnicmp(arg, "-no-rap", 7)) no_rap = 1;
 		else if (!strnicmp(arg, "-dims", 5)) load_type = GF_SM_LOAD_DIMS;
 		else if (!strnicmp(arg, "-src=", 5)) src_name = arg+5;
-        else if (!strnicmp(arg, "-udp=", 5)) { sk_port = atoi(arg+5); udp = 1; }
-        else if (!strnicmp(arg, "-tcp=", 5)) { sk_port = atoi(arg+5); udp = 0; }		
+		else if (!strnicmp(arg, "-udp=", 5)) {
+			sk_port = atoi(arg+5);
+			udp = 1;
+		}
+		else if (!strnicmp(arg, "-tcp=", 5)) {
+			sk_port = atoi(arg+5);
+			udp = 0;
+		}
 	}
 	if (!filename) {
 		fprintf(stderr, "Missing filename\n");
@@ -489,29 +538,29 @@ int live_session(int argc, char **argv)
 	if (dst_port && dst) livesess.streams = gf_list_new();
 
 	livesess.seng = gf_seng_init(&livesess, filename, load_type, NULL, (load_type == GF_SM_LOAD_DIMS) ? 1 : 0);
-    if (!livesess.seng) {
+	if (!livesess.seng) {
 		fprintf(stderr, "Cannot create scene engine\n");
 		return 1;
-    }
+	}
 	if (livesess.streams) live_session_setup(&livesess, dst, dst_port, path_mtu, ttl, ifce_addr, sdp_name);
 
 	has_carousel = 0;
 	last_src_modif = src_name ? gf_file_modification_time(src_name) : 0;
 
-    if (sk_port) {
-        sk = gf_sk_new(udp ? GF_SOCK_TYPE_UDP : GF_SOCK_TYPE_TCP);
-        if (udp) {
-            e = gf_sk_bind(sk, NULL, sk_port, NULL, 0, 0);
-            if (e != GF_OK) {
-                if (sk) gf_sk_del(sk);
-                sk = NULL;
-            }
-        } else {
-        }
-    }
+	if (sk_port) {
+		sk = gf_sk_new(udp ? GF_SOCK_TYPE_UDP : GF_SOCK_TYPE_TCP);
+		if (udp) {
+			e = gf_sk_bind(sk, NULL, sk_port, NULL, 0, 0);
+			if (e != GF_OK) {
+				if (sk) gf_sk_del(sk);
+				sk = NULL;
+			}
+		} else {
+		}
+	}
 
 
-	for (i=0; i<argc; i++) {
+	for (i=0; i<(u32) argc; i++) {
 		char *arg = argv[i];
 		if (!strnicmp(arg, "-rap=", 5)) {
 			u32 period, id, j;
@@ -575,19 +624,20 @@ int live_session(int argc, char **argv)
 					char szCom[8192];
 					fprintf(stderr, "Enter command to send:\n");
 					szCom[0] = 0;
-					if (1 > scanf("%[^\t\n]", szCom)){
-					    fprintf(stderr, "No command entered properly, aborting.\n");
-					    break;
+					if (1 > scanf("%[^\t\n]", szCom)) {
+						fprintf(stderr, "No command entered properly, aborting.\n");
+						break;
 					}
 					/*stdin flush bug*/
 					while (getchar()!='\n') {}
 					e = gf_seng_encode_from_string(livesess.seng, 0, 0, szCom, live_session_callback);
 					if (e) fprintf(stderr, "Processing command failed: %s\n", gf_error_to_string(e));
 					e = gf_seng_aggregate_context(livesess.seng, 0);
+					if (e) fprintf(stderr, "Aggregating context failed: %s\n", gf_error_to_string(e));
 					livesess.critical = 0;
 					update_context = 1;
 				}
-					break;
+				break;
 				case 'E':
 					livesess.critical = 1;
 				case 'e':
@@ -596,32 +646,33 @@ int live_session(int argc, char **argv)
 					char szCom[8192];
 					fprintf(stderr, "Enter command to send:\n");
 					szCom[0] = 0;
-					if (1 > scanf("%[^\t\n]", szCom)){
-					    printf("No command entered properly, aborting.\n");
-					    break;
+					if (1 > scanf("%[^\t\n]", szCom)) {
+						printf("No command entered properly, aborting.\n");
+						break;
 					}
 					/*stdin flush bug*/
 					while (getchar()!='\n') {}
 					e = gf_seng_encode_from_string(livesess.seng, 0, 1, szCom, live_session_callback);
 					if (e) fprintf(stderr, "Processing command failed: %s\n", gf_error_to_string(e));
-					livesess.critical = 0;				
+					livesess.critical = 0;
 					e = gf_seng_aggregate_context(livesess.seng, 0);
+					if (e) fprintf(stderr, "Aggregating context failed: %s\n", gf_error_to_string(e));
 
 				}
-					break;
+				break;
 
 				case 'p':
 				{
 					char rad[GF_MAX_PATH];
 					fprintf(stderr, "Enter output file name - \"std\" for stderr: ");
-					if (1 > scanf("%s", rad)){
-					    fprintf(stderr, "No ouput file name entered, aborting.\n");
-					    break;
+					if (1 > scanf("%s", rad)) {
+						fprintf(stderr, "No ouput file name entered, aborting.\n");
+						break;
 					}
 					e = gf_seng_save_context(livesess.seng, !strcmp(rad, "std") ? NULL : rad);
 					fprintf(stderr, "Dump done (%s)\n", gf_error_to_string(e));
 				}
-					break;
+				break;
 				case 'F':
 					update_context = 1;
 				case 'f':
@@ -641,13 +692,13 @@ int live_session(int argc, char **argv)
 				fprintf(stderr, "Update file modified - processing\n");
 				last_src_modif = mod_time;
 
-				srcf = gf_f64_open(src_name, "rt");
+				srcf = gf_fopen(src_name, "rt");
 				if (!srcf) continue;
 
 				/*checks if we have a broadcast config*/
 				if (!fgets(flag_buf, 200, srcf))
-				  flag_buf[0] = '\0';
-				fclose(srcf);
+					flag_buf[0] = '\0';
+				gf_fclose(srcf);
 
 				aggregate_on_stream = (u16) -1;
 				adjust_carousel_time = force_rap = discard_pending = signal_rap = signal_critical = 0;
@@ -699,10 +750,10 @@ int live_session(int argc, char **argv)
 
 		/*process updates from socket source*/
 		if (sk) {
-		    char buffer[2049];
-		    u32 bytes_read;
-		    u32 update_length;
-		    u32 bytes_received;
+			char buffer[2049];
+			u32 bytes_read;
+			u32 update_length;
+			u32 bytes_received;
 
 
 			e = gf_sk_receive(sk, buffer, 2048, 0, &bytes_read);
@@ -734,8 +785,8 @@ int live_session(int argc, char **argv)
 					gf_bs_del(bs);
 				}
 
-					set_broadcast_params(&livesess, es_id, period, ts_delta, aggregate_on_stream, adjust_carousel_time, force_rap, aggregate_au, discard_pending, signal_rap, signal_critical, version_inc);
-					break;
+				set_broadcast_params(&livesess, es_id, period, ts_delta, aggregate_on_stream, adjust_carousel_time, force_rap, aggregate_au, discard_pending, signal_rap, signal_critical, version_inc);
+				break;
 				default:
 					update_length = 0;
 					break;
@@ -792,7 +843,7 @@ int live_session(int argc, char **argv)
 			gf_sleep(10);
 			continue;
 		}
-		ch = next_carousel(&livesess, &next_time); 
+		ch = next_carousel(&livesess, (u32 *) &next_time);
 		if ((ch==NULL) || (next_time > 20)) {
 			gf_sleep(20);
 			continue;
@@ -813,3 +864,223 @@ exit:
 #endif /*!defined(GPAC_DISABLE_STREAMING) && !defined(GPAC_DISABLE_SENG)*/
 
 #endif /*defined(GPAC_DISABLE_ISOM) || defined(GPAC_DISABLE_ISOM_WRITE)*/
+
+#ifndef GPAC_DISABLE_MPEG2TS
+
+u32 grab_live_m2ts(const char *grab_m2ts, const char *grab_ifce, const char *outName)
+{
+	char data[0x80000];
+	u32 check = 50;
+	u64 nb_pck;
+	Bool first_run, is_rtp;
+	FILE *output;
+#ifndef GPAC_DISABLE_STREAMING
+	u16 seq_num;
+	GF_RTPReorder *ch = NULL;
+#endif
+	GF_Socket *sock;
+	GF_Err e = gf_m2ts_get_socket(grab_m2ts, grab_ifce, GF_M2TS_UDP_BUFFER_SIZE, &sock);
+
+	if (e) {
+		fprintf(stderr, "Cannot open %s: %s\n", grab_m2ts, gf_error_to_string(e));
+		return 1;
+	}
+	output = gf_fopen(outName, "wb");
+	if (!output) {
+		fprintf(stderr, "Cannot open %s: check path and rights\n", outName);
+		gf_sk_del(sock);
+		return 1;
+	}
+
+	fprintf(stderr, "Dumping %s stream to %s - press q to abort\n", grab_m2ts, outName);
+
+	first_run = 1;
+	is_rtp = 0;
+	while (1) {
+		u32 size = 0;
+
+		check--;
+		if (!check) {
+			if (gf_prompt_has_input()) {
+				char c = (char) gf_prompt_get_char();
+				if (c=='q') break;
+			}
+			check = 50;
+		}
+
+		/*m2ts chunks by chunks*/
+		e = gf_sk_receive(sock, data, 0x40000, 0, &size);
+		if (!size || e) {
+			gf_sleep(1);
+			continue;
+		}
+		if (first_run) {
+			first_run = 0;
+			/*FIXME: we assume only simple RTP packaging (no CSRC nor extensions)*/
+			if ((data[0] != 0x47) && ((data[1] & 0x7F) == 33) ) {
+				is_rtp = 1;
+#ifndef GPAC_DISABLE_STREAMING
+				ch = gf_rtp_reorderer_new(100, 500);
+#endif
+			}
+		}
+		/*process chunk*/
+		if (is_rtp) {
+#ifndef GPAC_DISABLE_STREAMING
+			char *pck;
+			seq_num = ((data[2] << 8) & 0xFF00) | (data[3] & 0xFF);
+			gf_rtp_reorderer_add(ch, (void *) data, size, seq_num);
+
+			pck = (char *) gf_rtp_reorderer_get(ch, &size);
+			if (pck) {
+				fwrite(pck+12, size-12, 1, output);
+				gf_free(pck);
+			}
+#else
+			fwrite(data+12, size-12, 1, output);
+#endif
+		} else {
+			fwrite(data, size, 1, output);
+		}
+	}
+	nb_pck = gf_ftell(output);
+	nb_pck /= 188;
+	fprintf(stderr, "Captured "LLU" TS packets\n", nb_pck );
+	gf_fclose(output);
+	gf_sk_del(sock);
+
+#ifndef GPAC_DISABLE_STREAMING
+	if (ch)
+		gf_rtp_reorderer_del(ch);
+#endif
+	return 0;
+}
+
+#endif /* GPAC_DISABLE_MPEG2TS */
+
+#ifndef GPAC_DISABLE_ATSC
+
+#include <gpac/atsc.h>
+
+static Bool inspect_mode = GF_FALSE;
+
+static u32 nb_services=0;
+void atsc_on_evt(void *udta, GF_ATSCEventType evt, u32 evt_param, GF_ATSCEventFileInfo *info)
+{
+	switch (evt) {
+	case GF_ATSC_EVT_SERVICE_FOUND:
+		fprintf(stderr, "found service id %d\n", evt_param);
+		nb_services++;
+		break;
+	case GF_ATSC_EVT_SERVICE_SCAN:
+		fprintf(stderr, "Done scaning all services\n");
+		break;
+	case GF_ATSC_EVT_SEG:
+		if (inspect_mode) {
+			gf_atsc3_dmx_remove_object_by_name( (GF_ATSCDmx *) udta, evt_param, (char *) info->filename, GF_FALSE);
+		}
+		break;
+	case GF_ATSC_EVT_MPD:
+		if (inspect_mode) {
+			fprintf(stderr, "MPD update found\n");
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void atsc_stats(GF_ATSCDmx *atscd, u32 now)
+{
+	Double rate=0.0;
+	u64 st = gf_atsc3_dmx_get_first_packet_time(atscd);
+	u64 et = gf_atsc3_dmx_get_last_packet_time(atscd);
+	u64 nb_pck = gf_atsc3_dmx_get_nb_packets(atscd);
+	u64 nb_bytes = gf_atsc3_dmx_get_recv_bytes(atscd);
+
+	et -= st;
+	if (et) {
+		rate = (Double)nb_bytes*8;
+		rate /= et;
+	}
+	if (now) {
+		fprintf(stderr, "                                                                                                 \r");
+		fprintf(stderr, "At %us stats: "LLU" bytes "LLU" packets in "LLU" ms rate %.02f mbps\r", now/1000, nb_bytes, nb_pck, et/1000, rate);
+	} else {
+		fprintf(stderr, "\nFinal stats: "LLU" bytes "LLU" packets in "LLU" ms rate %.02f mbps\n", nb_bytes, nb_pck, et/1000, rate);
+	}
+}
+
+u32 grab_atsc3_session(const char *dir, const char *ifce, s32 serviceID, s32 atsc_max_segs, u32 stats_rate, u32 debug_tsi)
+{
+	GF_ATSCDmx *atscd;
+	Bool run = GF_TRUE;
+	GF_SystemRTInfo rti;
+	u32 nb_stats=1;
+	u32 start_time = gf_sys_clock();
+
+	gf_sys_get_rti(0, &rti, 0);
+
+	atscd = gf_atsc3_dmx_new(ifce, dir, 0);
+	if (!atscd) {
+		fprintf(stderr, "Failed to create ATSC3 demuxer\n");
+		return 1;
+	}
+	gf_atsc3_set_callback(atscd, atsc_on_evt, atscd);
+	gf_atsc3_tune_in(atscd, (u32) serviceID, GF_FALSE);
+	if (atsc_max_segs>=0)
+		gf_atsc3_set_max_objects_store(atscd, (u32) atsc_max_segs);
+
+	if (debug_tsi) {
+		fprintf(stderr, "Filtering objects from TSI %d only\n", debug_tsi);
+		gf_atsc3_dmx_debug_tsi(atscd, debug_tsi);
+	}
+
+	if (!dir) {
+		fprintf(stderr, "No output dir, ATSC3 demux inspect mode only\n");
+		inspect_mode = GF_TRUE;
+	}
+	fprintf(stderr, "Starting ATSC3 demux, press 'q' to stop, 'm' for memory/cpu info\n");
+
+	while (atscd && run) {
+		Bool is_empty = GF_TRUE;
+		GF_Err e = gf_atsc3_dmx_process(atscd);
+		if (e != GF_IP_NETWORK_EMPTY) is_empty = GF_FALSE;
+
+		if (is_empty) {
+			u32 /*st, */now = gf_sys_clock()- start_time;
+			gf_sleep(1);
+
+			if (gf_prompt_has_input()) {
+				u8 c = gf_prompt_get_char();
+				switch (c) {
+				case 'q':
+					run = GF_FALSE;
+					break;
+				case 'm':
+					gf_sys_get_rti(100, &rti, 0);
+					fprintf(stderr, "CPU %02d - memory "LLU"\n", rti.process_cpu_usage,  rti.gpac_memory);
+					break;
+				}
+			}
+
+			if (!nb_services && (now >=10000)) {
+				fprintf(stderr, "\nNo ATSC3 service found in %u ms, aborting\n", now);
+				run = GF_FALSE;
+			}
+			if (stats_rate) {
+				/*st = gf_sys_clock();*/
+				if (now >= nb_stats*1000*stats_rate) {
+					nb_stats+=1;
+					atsc_stats(atscd, now);
+				}
+			}
+		}
+	}
+	atsc_stats(atscd, 0);
+	gf_atsc3_dmx_del(atscd);
+	fprintf(stderr, "\n");
+	return 0;
+}
+
+#endif /* GPAC_DISABLE_ATSC */

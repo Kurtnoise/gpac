@@ -159,11 +159,11 @@ u32 ext_media_load_th(void *par) {
 	od->URLString = gf_strdup("http://gpac.sourceforge.net/screenshots/lion.jpg");
 	od->objectDescriptorID = 0;
 	gf_sleep(2000); //TODO: remove the sleep
-	gf_term_add_media(self->owner, (GF_Descriptor*)od, 0);
+	gf_service_declare_media(self->owner, (GF_Descriptor*)od, 0);
 	return 0;
 }
 
-static u32 audio_gen_th(void *par) 
+static u32 audio_gen_th(void *par)
 {
 	GF_Err e;
 	char *data;
@@ -202,10 +202,10 @@ static u32 audio_gen_th(void *par)
 				com.map_time.timestamp = slh.compositionTimeStamp;
 				com.map_time.reset_buffers = 0;
 				com.base.on_channel = self->channel;
-				gf_term_on_command(self->owner, &com, GF_OK);
+				gf_service_command(self->owner, &com, GF_OK);
 				GF_LOG(GF_LOG_INFO, GF_LOG_MEDIA, ("[HYB In] Mapping WC  Time %04d/%02d/%02d %02d:%02d:%02d and Hyb time "LLD"\n",
-					(now_tm->tm_year + 1900), (now_tm->tm_mon + 1), now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec,
-					com.map_time.timestamp));
+				                                   (now_tm->tm_year + 1900), (now_tm->tm_mon + 1), now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec,
+				                                   com.map_time.timestamp));
 			}
 		}
 
@@ -232,7 +232,7 @@ static u32 audio_gen_th(void *par)
 #endif
 
 		e = GetData(self, &data, &data_size, &slh);
-		gf_term_on_sl_packet(self->owner, self->channel, data, data_size, &slh, e);
+		gf_service_send_packet(self->owner, self->channel, data, data_size, &slh, e);
 	}
 
 	self->state = HYB_STATE_STOPPED;
@@ -307,20 +307,20 @@ static GF_Err FM_FAKE_PUSH_Disconnect(GF_HYBMEDIA *self)
 static GF_Err FM_FAKE_PUSH_SetState(GF_HYBMEDIA *self, const GF_NET_CHAN_CMD state)
 {
 	switch(state) {
-		case GF_NET_CHAN_PLAY:
-			self->state = HYB_STATE_PLAYING;
-			break;
-		case GF_NET_CHAN_STOP:
-			audio_gen_stop(self);
-			break;
-		case GF_NET_CHAN_PAUSE:
-			self->state = HYB_STATE_PAUSE;
-			break;
-		case GF_NET_CHAN_RESUME:
-			self->state = HYB_STATE_PLAYING;
-			break;
-		default:
-			return GF_BAD_PARAM;
+	case GF_NET_CHAN_PLAY:
+		self->state = HYB_STATE_PLAYING;
+		break;
+	case GF_NET_CHAN_STOP:
+		audio_gen_stop(self);
+		break;
+	case GF_NET_CHAN_PAUSE:
+		self->state = HYB_STATE_PAUSE;
+		break;
+	case GF_NET_CHAN_RESUME:
+		self->state = HYB_STATE_PLAYING;
+		break;
+	default:
+		return GF_BAD_PARAM;
 	}
 
 	return GF_OK;

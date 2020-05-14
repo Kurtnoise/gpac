@@ -25,6 +25,7 @@
 
 #include <gpac/terminal.h>
 #include <gpac/internal/terminal_dev.h>
+#include <gpac/internal/compositor_dev.h>
 #include <gpac/modules/codec.h>
 #include <gpac/constants.h>
 #include <gpac/modules/service.h>
@@ -55,11 +56,16 @@ static jmethodID stopProcessing;
 static jmethodID getImageFormat;
 static jmethodID getImageHeight;
 static jmethodID getImageWidth;
+static jmethodID getBitsPerPixel;
 
+#ifndef GPAC_STATIC_MODULES
 jint JNI_OnLoad(JavaVM* vm, void* reserved)
+#else
+jint static_JNI_OnLoad(JavaVM* vm, void* reserved)
+#endif
 {
 	JNIEnv* env = 0;
-  javaVM = vm;
+	javaVM = vm;
 
 	if ( (*javaVM)->GetEnv(javaVM, (void**)&env, JNI_VERSION_1_2) != JNI_OK )
 		return -1;
@@ -141,12 +147,21 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved)
 		return -1;
 	}
 
+	getBitsPerPixel = (*env)->GetMethodID(env, camCtrlClass, "getBitsPerPixel", "()I");
+	if (getBitsPerPixel == 0)
+	{
+		LOGE("[ANDROID_CAMERA] Function getBitsPerPixel not found");
+		return -1;
+	}
+
 	return JNI_VERSION_1_2;
 }
+
+#ifndef GPAC_STATIC_MODULES
 //----------------------------------------------------------------------
 JavaVM* GetJavaVM()
 {
-    return javaVM;
+	return javaVM;
 }
 
 JNIEnv* GetEnv()
@@ -157,22 +172,27 @@ JNIEnv* GetEnv()
 
 	return env;
 }
+#else
+JavaVM* GetJavaVM();
+JNIEnv* GetEnv();
+
+#endif
 
 void JNI_OnUnload(JavaVM *vm, void *reserved)
 {
 	JNIEnv* env = 0;
-  	
+
 	if ( (*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_2) != JNI_OK )
 		return;
-	
+
 	(*env)->DeleteGlobalRef(env, camCtrlClass);
 }
 //----------------------------------------------------------------------
 
 
-#define CAM_PIXEL_FORMAT GF_PIXEL_NV21
+//#define CAM_PIXEL_FORMAT GF_PIXEL_NV21
 //GF_PIXEL_RGB_32
-#define CAM_PIXEL_SIZE 1.5f
+//#define CAM_PIXEL_SIZE 1.5f
 //4
 #define CAM_WIDTH 640
 #define CAM_HEIGHT 480
@@ -184,7 +204,7 @@ typedef struct
 	GF_InputService *input;
 	/*the service we're responsible for*/
 	GF_ClientService *service;
-	LPNETCHANNEL* channel;
+	LPNETCHANNEL channel;
 
 	/*input file*/
 	u32 time_scale;
@@ -212,6 +232,7 @@ typedef struct
 	jmethodID getImageFormat;
 	jmethodID getImageHeight;
 	jmethodID getImageWidth;
+	jmethodID getBitsPerPixel;
 
 } ISOMReader;
 
@@ -230,7 +251,7 @@ Bool CAM_CanHandleURL(GF_InputService *plug, const char *url)
 
 void unloadCameraControler(ISOMReader *read)
 {
-	GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] unloadCameraControler: %d\n", gf_th_id()));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] unloadCameraControler: %d\n", gf_th_id()));
 	if ( read->isAttached )
 	{
 		//(*rc->env)->PopLocalFrame(rc->env, NULL);
@@ -244,6 +265,7 @@ void unloadCameraControler(ISOMReader *read)
 u32 unregisterFunc(void* data)
 {
 	unloadCameraControler(globReader);
+	return 0;
 }
 
 void loadCameraControler(ISOMReader *read)
@@ -251,14 +273,15 @@ void loadCameraControler(ISOMReader *read)
 	JNIEnv* env = NULL;
 	jint res = 0;
 
-	GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] loadCameraControler: %d\n", gf_th_id()));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] loadCameraControler: %d\n", gf_th_id()));
 
 	// Get the JNI interface pointer
 	res = (*GetJavaVM())->GetEnv(javaVM, (void**)&env, JNI_VERSION_1_2);
 	if ( res == JNI_EDETACHED )
 	{
-		GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] The current thread is not attached to the VM, assuming native thread\n"));
-		if ( res = (*GetJavaVM())->AttachCurrentThread(GetJavaVM(), &env, NULL) )
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] The current thread is not attached to the VM, assuming native thread\n"));
+		res = (*GetJavaVM())->AttachCurrentThread(GetJavaVM(), &env, NULL);
+		if ( res )
 		{
 			GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] Attach current thread failed: %d\n", res));
 			return;
@@ -267,12 +290,11 @@ void loadCameraControler(ISOMReader *read)
 		read->isAttached = 1;
 		//(*rc->env)->PushLocalFrame(rc->env, 2);
 	}
-	else 
-		if ( res == JNI_EVERSION )
-		{
-			GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] The specified version is not supported\n"));
-			return;
-		}
+	else if ( res == JNI_EVERSION )
+	{
+		GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] The specified version is not supported\n"));
+		return;
+	}
 
 	read->env = env;
 	read->camCtrlClass = camCtrlClass;
@@ -284,6 +306,7 @@ void loadCameraControler(ISOMReader *read)
 	read->getImageFormat = getImageFormat;
 	read->getImageHeight = getImageHeight;
 	read->getImageWidth = getImageWidth;
+	read->getBitsPerPixel = getBitsPerPixel;
 
 	// Create the object.
 	read->camCtrlObj = (*env)->NewObject(env, read->camCtrlClass, read->cid);
@@ -300,6 +323,8 @@ GF_Err CAM_ConnectService(GF_InputService *plug, GF_ClientService *serv, const c
 	if (!plug || !plug->priv || !serv) return GF_SERVICE_ERROR;
 	read = (ISOMReader *) plug->priv;
 
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] CAM_ConnectService: %d\n", gf_th_id()));
+
 	read->input = plug;
 	read->service = serv;
 	read->base_track_id = 1;
@@ -309,8 +334,10 @@ GF_Err CAM_ConnectService(GF_InputService *plug, GF_ClientService *serv, const c
 
 	loadCameraControler(read);
 
+	camStartCamera(read);
+
 	/*reply to user*/
-	gf_term_on_connect(serv, NULL, GF_OK);
+	gf_service_connect_ack(serv, NULL, GF_OK);
 	//if (read->no_service_desc) isor_declare_objects(read);
 
 	return GF_OK;
@@ -322,18 +349,24 @@ GF_Err CAM_CloseService(GF_InputService *plug)
 	ISOMReader *read;
 	if (!plug || !plug->priv) return GF_SERVICE_ERROR;
 	read = (ISOMReader *) plug->priv;
+
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] CAM_CloseService: %d\n", gf_th_id()));
+
 	reply = GF_OK;
 
-	(*GetEnv())->DeleteLocalRef( GetEnv(), read->camCtrlObj ); 
+	(*GetEnv())->DeleteLocalRef( GetEnv(), read->camCtrlObj );
+	read->camCtrlObj = NULL;
 
 	//unloadCameraControler(read);
 
-	gf_term_on_disconnect(read->service, NULL, reply);
+	gf_service_disconnect_ack(read->service, NULL, reply);
 	return GF_OK;
 }
 
 u32 getWidth(ISOMReader *read);
 u32 getHeight(ISOMReader *read);
+u32 getFormat(ISOMReader *read);
+u32 getBitsPerPix(ISOMReader *read);
 
 static GF_Descriptor *CAM_GetServiceDesc(GF_InputService *plug, u32 expect_type, const char *sub_url)
 {
@@ -360,17 +393,17 @@ static GF_Descriptor *CAM_GetServiceDesc(GF_InputService *plug, u32 expect_type,
 		esd->decoderConfig->streamType = GF_STREAM_VISUAL;
 		esd->ESID = 1;
 		esd->decoderConfig->objectTypeIndication = GPAC_OTI_RAW_MEDIA_STREAM;
-		
+
 		bs = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
 
 		read->width = getWidth(read);
 		read->height = getHeight(read);
 
-		gf_bs_write_u32(bs, CAM_PIXEL_FORMAT); // fourcc
+		gf_bs_write_u32(bs, getFormat(read)); // fourcc
 		gf_bs_write_u16(bs, read->width); // width
 		gf_bs_write_u16(bs, read->height); // height
-		gf_bs_write_u32(bs, read->width * read->height * CAM_PIXEL_SIZE); // framesize
-		gf_bs_write_u32(bs, read->width * CAM_PIXEL_SIZE); // stride
+		gf_bs_write_u32(bs, read->width * read->height * getBitsPerPix(read) / 8); // framesize
+		gf_bs_write_u32(bs, read->width); // stride
 
 		gf_bs_align(bs);
 		gf_bs_get_content(bs, &buf, &buf_size);
@@ -396,6 +429,8 @@ GF_Err CAM_ConnectChannel(GF_InputService *plug, LPNETCHANNEL channel, const cha
 	if (!plug || !plug->priv) return GF_SERVICE_ERROR;
 	read = (ISOMReader *) plug->priv;
 
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] CAM_ConnectChannel: %d\n", gf_th_id()));
+
 	e = GF_OK;
 	if (upstream) {
 		e = GF_ISOM_INVALID_FILE;
@@ -403,9 +438,7 @@ GF_Err CAM_ConnectChannel(GF_InputService *plug, LPNETCHANNEL channel, const cha
 
 	read->channel = channel;
 
-	camStartCamera(read);
-
-	gf_term_on_connect(read->service, channel, e);
+	gf_service_connect_ack(read->service, channel, e);
 	return e;
 }
 
@@ -416,59 +449,14 @@ GF_Err CAM_DisconnectChannel(GF_InputService *plug, LPNETCHANNEL channel)
 	if (!plug || !plug->priv) return GF_SERVICE_ERROR;
 	read = (ISOMReader *) plug->priv;
 
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] CAM_DisconnectChannel: %d\n", gf_th_id()));
+
 	e = GF_OK;
 
 	camStopCamera(read);
 
-	gf_term_on_disconnect(read->service, channel, e);
+	gf_service_disconnect_ack(read->service, channel, e);
 	return e;
-}
-
-int* decodeYUV420SP( char* yuv420sp, int width, int height)
-{
-	int frameSize = width * height;
-	int j, yp, uvp, i, y, y1192, r, g, b, u, v;
-	int ti, tj;
-
-	int* rgb = (int*)gf_malloc(width*height*4);
-	for (j = 0, yp = 0, tj=height-1; j < height; j++, tj--)
-	{
-		uvp = frameSize + (j >> 1) * width, u = 0, v = 0;
-		for (i = 0, ti=0; i < width; i++, yp++, ti+=width)
-		{
-			y = (0xff & ((int) yuv420sp[yp])) - 16;
-			if (y < 0) y = 0;
-			if ((i & 1) == 0)
-			{
-				v = (0xff & yuv420sp[uvp++]) - 128;
-				u = (0xff & yuv420sp[uvp++]) - 128;
-			}
-
-			y1192 = 1192 * y;
-			r = (y1192 + 1634 * v);
-			g = (y1192 - 833 * v - 400 * u);
-			b = (y1192 + 2066 * u);
-
-			if (r < 0)
-				r = 0;
-			else if (r > 262143)
-				r = 262143;
-			if (g < 0)
-				g = 0;
-			else if (g > 262143)
-				g = 262143;
-			if (b < 0)
-				b = 0;
-			else if (b > 262143)
-				b = 262143;
-
-			rgb[yp] = 0xff000000 | ((r << 6) & 0xff0000)
-						| ((g >> 2) & 0xff00) | ((b >> 10) & 0xff);
-//			rgb[ti+tj] = 0xff000000 | ((r << 6) & 0xff0000)
-//					| ((g >> 2) & 0xff00) | ((b >> 10) & 0xff);
-		}
-	}
-	return rgb;
 }
 
 void Java_com_gpac_Osmo4_Preview_processFrameBuf( JNIEnv* env, jobject thiz, jbyteArray arr)
@@ -483,24 +471,25 @@ void Java_com_gpac_Osmo4_Preview_processFrameBuf( JNIEnv* env, jobject thiz, jby
 	jbyte *jdata;
 	jsize len;
 
-	if ( ctx->started )
+	if ( ctx && ctx->started && ctx->term && ctx->term->compositor && ctx->term->compositor->audio_renderer)
 	{
 		len = (*env)->GetArrayLength(env, arr);
+		if ( len <= 0 ) return;
 		jdata = (*env)->GetByteArrayElements(env,arr,0);
 
-		convTime = gf_term_get_time(ctx->term);
+		//convTime = gf_term_get_time(ctx->term);
 
 		data = (u8*)jdata;//(u8*)decodeYUV420SP((char*)jdata, ctx->width, ctx->height); //
 		datasize = len;//ctx->width * ctx->height * CAM_PIXEL_SIZE;//
 
 		cts = gf_term_get_time(ctx->term);
 
-		convTime = cts - convTime;
+		//convTime = cts - convTime;
 
 		memset(&hdr, 0, sizeof(hdr));
 		hdr.compositionTimeStampFlag = 1;
 		hdr.compositionTimeStamp = cts;
-		gf_term_on_sl_packet(ctx->service, ctx->channel, (void*)data, datasize, &hdr, GF_OK);
+		gf_service_send_packet(ctx->service, ctx->channel, (void*)data, datasize, &hdr, GF_OK);
 
 		//gf_free(data);
 
@@ -520,9 +509,9 @@ void CallCamMethod(ISOMReader *read, jmethodID methodID)
 	res = (*GetJavaVM())->GetEnv(javaVM, (void**)&env, JNI_VERSION_1_2);
 	if ( res == JNI_EDETACHED )
 	{
-		GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] The current thread is not attached to the VM, assuming native thread\n"));
-		if ( res = (*GetJavaVM())->AttachCurrentThread(GetJavaVM(), &env, NULL) )
-		{
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] The current thread is not attached to the VM, assuming native thread\n"));
+		res = (*GetJavaVM())->AttachCurrentThread(GetJavaVM(), &env, NULL);
+		if ( res ) {
 			GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] Attach current thread failed: %d\n", res));
 			return;
 		}
@@ -533,7 +522,7 @@ void CallCamMethod(ISOMReader *read, jmethodID methodID)
 	(*env)->CallNonvirtualVoidMethod(env, read->camCtrlObj, read->camCtrlClass, methodID);
 
 	if (isAttached)
-	{	
+	{
 		(*GetJavaVM())->DetachCurrentThread(GetJavaVM());
 	}
 }
@@ -543,7 +532,7 @@ void camStartCamera(ISOMReader *read)
 	JNIEnv* env = NULL;
 	jboolean isPortrait = JNI_FALSE;
 
-	GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] startCamera: %d\n", gf_th_id()));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] startCamera: %d\n", gf_th_id()));
 
 	// Get the JNI interface pointer
 	env = read->env;
@@ -553,14 +542,14 @@ void camStartCamera(ISOMReader *read)
 
 void camStopCamera(ISOMReader *read)
 {
-	GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] stopCamera: %d\n", gf_th_id()));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] stopCamera: %d\n", gf_th_id()));
 
 	CallCamMethod(read, read->stopCamera);
 }
 
 void pauseCamera(ISOMReader *read)
 {
-	GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] pauseCamera: %d\n", gf_th_id()));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] pauseCamera: %d\n", gf_th_id()));
 
 	read->started = 0;
 	CallCamMethod(read, read->stopProcessing);
@@ -568,7 +557,7 @@ void pauseCamera(ISOMReader *read)
 
 void resumeCamera(ISOMReader *read)
 {
-	GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] resumeCamera: %d\n", gf_th_id()));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] resumeCamera: %d\n", gf_th_id()));
 
 	read->started = 1;
 	CallCamMethod(read, read->startProcessing);
@@ -578,7 +567,7 @@ u32 getWidth(ISOMReader *read)
 {
 	JNIEnv* env = NULL;
 
-	GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] getWidth: %d\n", gf_th_id()));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] getWidth: %d\n", gf_th_id()));
 
 	// Get the JNI interface pointer
 	env = read->env;
@@ -590,12 +579,45 @@ u32 getHeight(ISOMReader *read)
 {
 	JNIEnv* env = NULL;
 
-	GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[ANDROID_CAMERA] getHeight: %d\n", gf_th_id()));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] getHeight: %d\n", gf_th_id()));
 
 	// Get the JNI interface pointer
 	env = read->env;
 
 	return (*env)->CallNonvirtualIntMethod(env, read->camCtrlObj, read->camCtrlClass, read->getImageHeight);
+}
+
+u32 getFormat(ISOMReader *read)
+{
+	JNIEnv* env = NULL;
+	u32 pixel_format;
+
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] getFormat: %d\n", gf_th_id()));
+
+	// Get the JNI interface pointer
+	env = read->env;
+
+	pixel_format = (*env)->CallNonvirtualIntMethod(env, read->camCtrlObj, read->camCtrlClass, read->getImageFormat);
+	switch (pixel_format) {
+	case 17: //NV21
+		return GF_PIXEL_NV21;
+	case 842094169: //YV12
+		return GF_PIXEL_YV12;
+	default:
+		return 0; //should never be here
+	}
+}
+
+u32 getBitsPerPix(ISOMReader *read)
+{
+	JNIEnv* env = NULL;
+
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_CORE, ("[ANDROID_CAMERA] getBitsPerPix: %d\n", gf_th_id()));
+
+	// Get the JNI interface pointer
+	env = read->env;
+
+	return (*env)->CallNonvirtualIntMethod(env, read->camCtrlObj, read->camCtrlClass, read->getBitsPerPixel);
 }
 
 GF_Err CAM_ServiceCommand(GF_InputService *plug, GF_NetworkCommand *com)
@@ -630,31 +652,8 @@ GF_Err CAM_ServiceCommand(GF_InputService *plug, GF_NetworkCommand *com)
 	/*nothing to do on MP4 for channel config*/
 	case GF_NET_CHAN_CONFIG:
 		return GF_OK;
-	case GF_NET_CHAN_GET_PIXEL_AR:
-		return 1<<16;//gf_isom_get_pixel_aspect_ratio(read->mov, ch->track, 1, &com->par.hSpacing, &com->par.vSpacing);
-	case GF_NET_CHAN_GET_DSI:
-		{
-			GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("Cam get DSI\n"));
-			/*it may happen that there are conflicting config when using ESD URLs...*/
-			bs = gf_bs_new(NULL, 0, GF_BITSTREAM_WRITE);
-
-			read->width = getWidth(read);
-			read->height = getHeight(read);
-
-			gf_bs_write_u32(bs, CAM_PIXEL_FORMAT); // fourcc
-			gf_bs_write_u16(bs, read->width); // width
-			gf_bs_write_u16(bs, read->height); // height
-			gf_bs_write_u32(bs, read->width * read->height * CAM_PIXEL_SIZE); // framesize
-			gf_bs_write_u32(bs, read->width * CAM_PIXEL_SIZE); // stride
-
-			gf_bs_align(bs);
-			gf_bs_get_content(bs, &buf, &buf_size);
-			gf_bs_del(bs);
-
-			com->get_dsi.dsi = buf;
-			com->get_dsi.dsi_len = buf_size;
-			return GF_OK;
-		}
+	default:
+		break;
 	}
 	return GF_NOT_SUPPORTED;
 }
@@ -676,6 +675,12 @@ GF_InputService *CAM_client_load()
 	GF_SAFEALLOC(reader, ISOMReader);
 	plug->priv = reader;
 	globReader = reader;
+
+
+#ifdef GPAC_STATIC_MODULES
+	static_JNI_OnLoad(GetJavaVM(), NULL);
+#endif
+
 	return plug;
 }
 
@@ -688,7 +693,7 @@ void CAM_client_del(GF_BaseInterface *bi)
 	gf_free(bi);
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
@@ -698,7 +703,7 @@ const u32 *QueryInterfaces()
 	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	if (InterfaceType == GF_NET_CLIENT_INTERFACE)
@@ -706,10 +711,14 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
-	case GF_NET_CLIENT_INTERFACE: CAM_client_del(ifce); break;
+	case GF_NET_CLIENT_INTERFACE:
+		CAM_client_del(ifce);
+		break;
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( droid_cam )

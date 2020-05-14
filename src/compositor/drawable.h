@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -39,7 +39,7 @@ typedef struct _bound_info
 	GF_IRect clip;
 	/*uncliped bounds - needed to track moving objects fully contained in visual and for image bliting*/
 	GF_Rect unclip;
-	/* extra_check: 
+	/* extra_check:
 		for MPEG-4: pointer to appearance node (due to DEF/USE) in order to detect same bounds and appearance node change
 		for SVG: currently not used, should be needed for <use>
 	*/
@@ -65,14 +65,14 @@ typedef struct _dirty_rect_info
 enum {
 	/*user defined flags*/
 
-	/*if flag set, the node callback function will be used to draw the node. Otherwise, 
+	/*if flag set, the node callback function will be used to draw the node. Otherwise,
 	high-level draw operations on the drawable & drawable context will be used*/
 	DRAWABLE_USE_TRAVERSE_DRAW = 1,
 
 	/*bounds tracker flags, INTERNAL TO RENDERER */
 
 	/*flag set by drawable_mark_modified during a TRAVERSE_SORT pass when geometry's node has been modified. This forces clearing of the node
-	and skips bounds checking. 
+	and skips bounds checking.
 	Flag is cleared by the compositor*/
 	DRAWABLE_HAS_CHANGED = 1<<1,
 	/*same flag as above except set when picking/getting bounds out of the main scene traversal routine (user event, script)*/
@@ -87,8 +87,11 @@ enum {
 	/*drawable is an overlay surface*/
 	DRAWABLE_IS_OVERLAY = 1<<5,
 
-	/**/
+	/*drawable has a cache texture*/
 	DRAWABLE_IS_CACHED = 1<<6,
+
+	/*drawable has been initialized for hybrid GL mode - used to perform the initial clear of the overlay graphics*/
+	DRAWABLE_HYBGL_INIT = 1<<7,
 };
 
 struct _drawable
@@ -146,7 +149,7 @@ void drawable_mark_modified(Drawable *st, GF_TraverseState *tr_state);
 /*checks if the current object is the focused one, and insert the focus drawable at the current pos*/
 void drawable_check_focus_highlight(GF_Node *node, GF_TraverseState *tr_state, GF_Rect *orig_bounds);
 
-/*reset the highlight state (bounds) if associated with the current node. This is automatically called 
+/*reset the highlight state (bounds) if associated with the current node. This is automatically called
 whenever reseting a drawable but must be called when a grouping node is modified*/
 void drawable_reset_group_highlight(GF_TraverseState *tr_state, GF_Node *n);
 
@@ -217,6 +220,11 @@ enum
 	CTX_SVG_OUTLINE_GEOMETRY_DIRTY = 1<<9,
 	/*indicates the context is in a flip coord state (used for image and text flip)*/
 	CTX_FLIPED_COORDS = 1<<10,
+	//flag set in opengl auto mode to indicate that the corresponding area should not be cleared but still redrawn (this means an opaque texture is used)
+	CTX_HYBOGL_NO_CLEAR = 1<<11,
+	//flag set in opengl auto mode to indicate that the corresponding area should not be cleared but still redrawn (this means an opaque texture is used)
+	CTX_BACKROUND_NOT_LAYER = 1<<12,
+	CTX_BACKROUND_NO_CLEAR= 1<<13,
 };
 
 #define CTX_3DTYPE_MASK 0x7800
@@ -251,13 +259,13 @@ struct _drawable_context
 		for SVG: parent <use> node if any
 	*/
 	GF_Node *appear;
-	
+
 #ifdef GF_SR_USE_DEPTH
-    //local gain and offset
-    Fixed depth_gain, depth_offset;
+	//local gain and offset
+	Fixed depth_gain, depth_offset;
 #endif
-	
-};	
+
+};
 
 DrawableContext *NewDrawableContext();
 void DeleteDrawableContext(DrawableContext *);
@@ -317,4 +325,5 @@ void drawable_compute_line_scale(GF_TraverseState *tr_state, DrawAspect2D *asp);
 
 Bool svg_drawable_is_over(Drawable *drawable, Fixed x, Fixed y, DrawAspect2D *asp, GF_TraverseState *tr_state, GF_Rect *glyph_rc);
 
+void drawable_check_texture_dirty(DrawableContext *ctx, Drawable *drawable, GF_TraverseState *tr_state);
 #endif

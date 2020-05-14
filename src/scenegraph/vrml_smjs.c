@@ -60,6 +60,8 @@ Bool gf_js_add_root(JSContext *cx, void *rp, u32 type)
 	return (JS_AddRoot(cx, rp)==JS_TRUE) ? 1 : 0;
 #endif
 }
+
+GF_EXPORT
 Bool gf_js_add_named_root(JSContext *cx, void *rp, u32 type, const char *name)
 {
 #if (JS_VERSION>=185)
@@ -84,54 +86,43 @@ Bool gf_js_add_named_root(JSContext *cx, void *rp, u32 type, const char *name)
 #endif
 }
 
-GF_EXPORT
-Bool gf_js_remove_root(JSContext *cx, void *rp, u32 type)
-{
-#if (JS_VERSION>=185)
-	if (!cx) return 1;
-	switch (type) {
-	case GF_JSGC_STRING:
-		JS_RemoveStringRoot(cx, rp);
-		break;
-	case GF_JSGC_OBJECT:
-		JS_RemoveObjectRoot(cx, rp);
-		break;
-	case GF_JSGC_VAL:
-		JS_RemoveValueRoot(cx, rp);
-		break;
-	default:
-		JS_RemoveGCThingRoot(cx, rp);
-		break;
-	}
-	return 1;
-#else
-	return (JS_RemoveRoot(cx, rp)==JS_TRUE) ? 1 : 0;
-#endif
-}
 
-JSObject *gf_sg_js_global_object(JSContext *cx, JSClass *__class)
+JSObject *gf_sg_js_global_object(JSContext *cx, GF_JSClass *__class)
 {
 #if (JS_VERSION>=185)
-	__class->flags |= JSCLASS_GLOBAL_FLAGS;
-	return JS_NewCompartmentAndGlobalObject(cx, __class, NULL);
+	__class->_class.flags |= JSCLASS_GLOBAL_FLAGS;
+#ifdef USE_FFDEV_16
+	return JS_NewGlobalObject(cx, &__class->_class, NULL);
 #else
-	return JS_NewObject(cx, __class, 0, 0 );
+	return JS_NewCompartmentAndGlobalObject(cx, &__class->_class, NULL);
+#endif
+
+#else
+	return JS_NewObject(cx, &__class->_class, 0, 0 );
 #endif
 }
 
 #if !defined(__GNUC__)
 # if defined(_WIN32_WCE)
 #  pragma comment(lib, "js32")
+# elif defined (_WIN64)
+#  pragma comment(lib, "js")
 # elif defined (WIN32)
-#  pragma comment(lib, "js32")
+#  pragma comment(lib, "js")
 # endif
 #endif
 
-/*define this macro to force Garbage Collection after each input to JS (script initialize/shutdown and all eventIn) 
+/*define this macro to force Garbage Collection after each input to JS (script initialize/shutdown and all eventIn)
 on latest SM, GC will crash if called from a different thread than the thread creating the contex, no clue why
+
+for iOS don't force GC (better performances according to Ivica)
+
+NOTE - this is currently disabled, as performing the GC at each root with complex scenes (lots of objects) really decreases performances
 */
-#if (JS_VERSION<180)
-#define FORCE_GC
+#if !defined(GPAC_IPHONE)
+# if (JS_VERSION<180)
+//#  define FORCE_GC
+# endif
 #endif
 
 
@@ -156,7 +147,7 @@ typedef struct
 
 	JSObject *obj;
 	jsval fun;
-} GF_RouteToFunction;
+} GF_RouteToScript;
 
 
 #define _ScriptMessage(_c, _msg) {	\
@@ -187,37 +178,74 @@ typedef struct
 	JSContext *ctx;
 
 	GF_Mutex *mx;
-	JSClass SFNodeClass;
+	GF_JSClass SFNodeClass;
 
 #ifndef GPAC_DISABLE_VRML
-	JSClass globalClass;
-	JSClass browserClass;
-	JSClass SFVec2fClass;
-	JSClass SFVec3fClass;
-	JSClass SFRotationClass;
-	JSClass SFColorClass;
-	JSClass SFImageClass;
-	JSClass MFInt32Class;
-	JSClass MFBoolClass;
-	JSClass MFFloatClass;
-	JSClass MFTimeClass;
-	JSClass MFVec2fClass;
-	JSClass MFVec3fClass;
-	JSClass MFRotationClass;
-	JSClass MFColorClass;
-	JSClass MFStringClass;
-	JSClass MFUrlClass;
-	JSClass MFNodeClass;
-	JSClass AnyClass;
+	GF_JSClass globalClass;
+	GF_JSClass browserClass;
+	GF_JSClass SFVec2fClass;
+	GF_JSClass SFVec3fClass;
+	GF_JSClass SFRotationClass;
+	GF_JSClass SFColorClass;
+	GF_JSClass SFImageClass;
+	GF_JSClass MFInt32Class;
+	GF_JSClass MFBoolClass;
+	GF_JSClass MFFloatClass;
+	GF_JSClass MFTimeClass;
+	GF_JSClass MFVec2fClass;
+	GF_JSClass MFVec3fClass;
+	GF_JSClass MFRotationClass;
+	GF_JSClass MFColorClass;
+	GF_JSClass MFStringClass;
+	GF_JSClass MFUrlClass;
+	GF_JSClass MFNodeClass;
+	GF_JSClass AnyClass;
 #endif
 
 	/*extensions are loaded for the lifetime of the runtime NOT of the context - this avoids nasty
 	crashes with multiple contexts in SpiderMonkey (root'ing bug with InitStandardClasses)*/
 	GF_List *extensions;
+
+	GF_List *allocated_contexts;
 } GF_JSRuntime;
 
 static GF_JSRuntime *js_rt = NULL;
 
+GF_EXPORT
+Bool gf_js_remove_root(JSContext *cx, void *rp, u32 type)
+{
+#if (JS_VERSION>=185)
+	switch (type) {
+	case GF_JSGC_STRING:
+#ifdef USE_FFDEV_15
+		if (!cx) JS_RemoveStringRootRT(js_rt->js_runtime, rp);
+		else
+#endif
+			JS_RemoveStringRoot(cx, rp);
+		break;
+	case GF_JSGC_OBJECT:
+#ifdef USE_FFDEV_15
+		if (!cx) JS_RemoveObjectRootRT(js_rt->js_runtime, rp);
+		else
+#endif
+			JS_RemoveObjectRoot(cx, rp);
+		break;
+	case GF_JSGC_VAL:
+#ifdef USE_FFDEV_15
+		if (!cx) JS_RemoveValueRootRT(js_rt->js_runtime, rp);
+		else
+#endif
+			JS_RemoveValueRoot(cx, (jsval *) rp);
+		break;
+	default:
+		if (cx) JS_RemoveGCThingRoot(cx, rp);
+		break;
+	}
+	return 1;
+#else
+	return (JS_RemoveRoot(cx, rp)==JS_TRUE) ? 1 : 0;
+#endif
+}
 
 void gf_sg_load_script_extensions(GF_SceneGraph *sg, JSContext *c, JSObject *obj, Bool unload)
 {
@@ -275,6 +303,7 @@ static void gf_sg_load_script_modules(GF_SceneGraph *sg)
 		if (!ext) continue;
 		gf_list_add(js_rt->extensions, ext);
 	}
+	GF_LOG(GF_LOG_INFO, GF_LOG_SCRIPT, ("[ECMAScript] found %d JS extensions for %d modules\n", gf_list_count(js_rt->extensions), count));
 }
 
 static void gf_sg_unload_script_modules()
@@ -315,7 +344,12 @@ JSContext *gf_sg_ecmascript_new(GF_SceneGraph *sg)
 			return NULL;
 		}
 		GF_SAFEALLOC(js_rt, GF_JSRuntime);
+		if (!js_rt) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_SCENE, ("[JS] Failed to create script runtime\n"));
+			return NULL;
+		}
 		js_rt->js_runtime = js_runtime;
+		js_rt->allocated_contexts = gf_list_new();
 		js_rt->mx = gf_mx_new("JavaScript");
 		GF_LOG(GF_LOG_DEBUG, GF_LOG_SCRIPT, ("[ECMAScript] ECMAScript runtime allocated %p\n", js_runtime));
 		gf_sg_load_script_modules(sg);
@@ -338,6 +372,8 @@ JSContext *gf_sg_ecmascript_new(GF_SceneGraph *sg)
 		JS_ClearRuntimeThread(js_rt->js_runtime);
 	}
 #endif
+
+	gf_list_add(js_rt->allocated_contexts, ctx);
 	gf_mx_v(js_rt->mx);
 
 	return ctx;
@@ -349,10 +385,13 @@ void gf_sg_ecmascript_del(JSContext *ctx)
 #if (JS_VERSION>=185)
 	assert(js_rt);
 	JS_SetRuntimeThread(js_rt->js_runtime);
-	JS_SetContextThread(ctx); 
+	JS_SetContextThread(ctx);
 #endif
 #endif
 
+	gf_sg_js_call_gc(ctx);
+
+	gf_list_del_item(js_rt->allocated_contexts, ctx);
 	JS_DestroyContext(ctx);
 	if (js_rt) {
 		js_rt->nb_inst --;
@@ -360,6 +399,7 @@ void gf_sg_ecmascript_del(JSContext *ctx)
 			JS_DestroyRuntime(js_rt->js_runtime);
 			JS_ShutDown();
 			gf_sg_unload_script_modules();
+			gf_list_del(js_rt->allocated_contexts);
 			gf_mx_del(js_rt->mx);
 			gf_free(js_rt);
 			js_rt = NULL;
@@ -370,7 +410,9 @@ void gf_sg_ecmascript_del(JSContext *ctx)
 
 GF_EXPORT
 #if (JS_VERSION>=185)
-#ifdef USE_FFDEV_15
+#if defined(USE_FFDEV_18)
+JSBool gf_sg_js_has_instance(JSContext *c, JSHandleObject obj, JSMutableHandleValue __val, JSBool *vp)
+#elif defined(USE_FFDEV_15)
 JSBool gf_sg_js_has_instance(JSContext *c, JSHandleObject obj,const jsval *val, JSBool *vp)
 #else
 JSBool gf_sg_js_has_instance(JSContext *c, JSObject *obj,const jsval *val, JSBool *vp)
@@ -379,6 +421,9 @@ JSBool gf_sg_js_has_instance(JSContext *c, JSObject *obj,const jsval *val, JSBoo
 JSBool gf_sg_js_has_instance(JSContext *c, JSObject *obj, jsval val, JSBool *vp)
 #endif
 {
+#ifdef USE_FFDEV_18
+	jsval       *val = __val._;
+#endif
 	*vp = JS_FALSE;
 #if (JS_VERSION>=185)
 	if (val && JSVAL_IS_OBJECT(*val)) {
@@ -400,19 +445,13 @@ JSBool gf_sg_js_has_instance(JSContext *c, JSObject *obj, jsval val, JSBool *vp)
 GF_Node *dom_get_element(JSContext *c, JSObject *obj);
 #endif
 
-#ifndef GPAC_DISABLE_VRML
 
-/*MPEG4 & X3D tags (for node tables & script handling)*/
-#include <gpac/nodes_mpeg4.h>
-#include <gpac/nodes_x3d.h>
-
-
-void gf_sg_script_to_node_field(struct JSContext *c, jsval v, GF_FieldInfo *field, GF_Node *owner, GF_JSField *parent);
+JSBool gf_sg_script_to_node_field(struct JSContext *c, jsval v, GF_FieldInfo *field, GF_Node *owner, GF_JSField *parent);
 jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_Node *parent, Bool force_evaluate);
 
 static void JSScript_NodeModified(GF_SceneGraph *sg, GF_Node *node, GF_FieldInfo *info, GF_Node *script);
 
-Bool JSScriptFromFile(GF_Node *node, const char *opt_file, Bool no_complain);
+Bool JSScriptFromFile(GF_Node *node, const char *opt_file, Bool no_complain, jsval *rval);
 
 void gf_sg_js_call_gc(JSContext *c)
 {
@@ -425,19 +464,29 @@ void gf_sg_js_call_gc(JSContext *c)
 	gf_sg_lock_javascript(c, 0);
 }
 
-#ifdef FORCE_GC
-void MyJSGC(JSContext *c) 
+void do_js_gc(JSContext *c, GF_Node *node)
 {
-	gf_sg_js_call_gc(c);
-  
-}
+#ifdef FORCE_GC
+	node->sgprivate->scenegraph->trigger_gc = GF_TRUE;
 #endif
 
+	if (node->sgprivate->scenegraph->trigger_gc) {
+		node->sgprivate->scenegraph->trigger_gc = GF_FALSE;
+		gf_sg_js_call_gc(c);
+	}
+}
+
+
+#ifndef GPAC_DISABLE_VRML
+
+/*MPEG4 & X3D tags (for node tables & script handling)*/
+#include <gpac/nodes_mpeg4.h>
+#include <gpac/nodes_x3d.h>
 
 void SFColor_fromHSV(SFColor *col)
 {
-    Fixed f, q, t, p, hue, sat, val;
-    u32 i;
+	Fixed f, q, t, p, hue, sat, val;
+	u32 i;
 	hue = col->red;
 	sat = col->green;
 	val = col->blue;
@@ -445,21 +494,45 @@ void SFColor_fromHSV(SFColor *col)
 		col->red = col->green = col->blue = val;
 		return;
 	}
-    if (hue == FIX_ONE) hue = 0;
-    else hue *= 6;
-    i = FIX2INT( gf_floor(hue) );
-    f = hue-i;
-    p = gf_mulfix(val, FIX_ONE - sat);
-    q = gf_mulfix(val, FIX_ONE - gf_mulfix(sat,f));
-    t = gf_mulfix(val, FIX_ONE - gf_mulfix(sat, FIX_ONE - f));
-    switch (i) {
-	case 0: col->red = val; col->green = t; col->blue = p; break;
-	case 1: col->red = q; col->green = val; col->blue = p; break;
-	case 2: col->red = p; col->green = val; col->blue = t; break;
-	case 3: col->red = p; col->green = q; col->blue = val; break;
-	case 4: col->red = t; col->green = p; col->blue = val; break;
-	case 5: col->red = val; col->green = p; col->blue = q; break;
-    }
+	if (hue == FIX_ONE) hue = 0;
+	else hue *= 6;
+	i = FIX2INT( gf_floor(hue) );
+	f = hue-i;
+	p = gf_mulfix(val, FIX_ONE - sat);
+	q = gf_mulfix(val, FIX_ONE - gf_mulfix(sat,f));
+	t = gf_mulfix(val, FIX_ONE - gf_mulfix(sat, FIX_ONE - f));
+	switch (i) {
+	case 0:
+		col->red = val;
+		col->green = t;
+		col->blue = p;
+		break;
+	case 1:
+		col->red = q;
+		col->green = val;
+		col->blue = p;
+		break;
+	case 2:
+		col->red = p;
+		col->green = val;
+		col->blue = t;
+		break;
+	case 3:
+		col->red = p;
+		col->green = q;
+		col->blue = val;
+		break;
+	case 4:
+		col->red = t;
+		col->green = p;
+		col->blue = val;
+		break;
+	case 5:
+		col->red = val;
+		col->green = p;
+		col->blue = q;
+		break;
+	}
 }
 
 void SFColor_toHSV(SFColor *col)
@@ -495,6 +568,7 @@ static GFINLINE GF_JSField *NewJSField(JSContext *c)
 {
 	GF_JSField *ptr;
 	GF_SAFEALLOC(ptr, GF_JSField);
+	if (!ptr) return NULL;
 	ptr->js_ctx = c;
 	return ptr;
 }
@@ -511,15 +585,34 @@ static GFINLINE GF_ScriptPriv *JS_GetScriptStack(JSContext *c)
 
 static void script_error(JSContext *c, const char *msg, JSErrorReport *jserr)
 {
-	GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[JavaScript] Error: %s - line %d (%s)", msg, jserr->lineno, jserr->linebuf));
+	if (jserr->linebuf) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[JavaScript] Error: %s - line %d (%s) - file %s\n", msg, jserr->lineno, jserr->linebuf, jserr->filename));
+	} else if (jserr->filename) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[JavaScript] Error: %s - line %d - file %s\n", msg, jserr->lineno, jserr->filename));
+	} else {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[JavaScript] Error: %s - line %d\n", msg, jserr->lineno));
+	}
 }
 
 static JSBool SMJS_FUNCTION(JSPrint)
 {
-	SMJS_ARGS	
+	SMJS_ARGS
+	if (!argc) return JS_FALSE;
+
 	if (JSVAL_IS_STRING(argv[0])) {
 		char *str = SMJS_CHARS(c, argv[0]);
 		_ScriptMessage(c, str);
+		SMJS_FREE(c, str);
+	}
+	if (JSVAL_IS_INT(argv[0]) && (argc>1) && JSVAL_IS_STRING(argv[1]) ) {
+		u32 level = JSVAL_TO_INT(argv[0]);
+		char *str = SMJS_CHARS(c, argv[1]);
+		if (level > GF_LOG_DEBUG) level = GF_LOG_DEBUG;
+		if (str[0] == '[') {
+			GF_LOG(level, GF_LOG_CONSOLE, ("%s\n", str));
+		} else {
+			GF_LOG(level, GF_LOG_CONSOLE, ("[JS] %s\n", str));
+		}
 		SMJS_FREE(c, str);
 	}
 	return JS_TRUE;
@@ -597,16 +690,26 @@ static JSObject *node_get_binding(GF_ScriptPriv *priv, GF_Node *node, Bool is_co
 	node->sgprivate->flags |= GF_NODE_HAS_BINDING;
 	gf_node_register(node, NULL);
 
-	obj = JS_NewObject(priv->js_ctx, &js_rt->SFNodeClass, 0, 0);
+	obj = JS_NewObject(priv->js_ctx, &js_rt->SFNodeClass._class, 0, 0);
 	SMJS_SET_PRIVATE(priv->js_ctx, obj, field);
 
 	field->obj = obj;
 	gf_list_add(priv->js_cache, obj);
 
 	/*remember the object*/
-	if (!node->sgprivate->interact) GF_SAFEALLOC(node->sgprivate->interact, struct _node_interactive_ext);
+	if (!node->sgprivate->interact) {
+		GF_SAFEALLOC(node->sgprivate->interact, struct _node_interactive_ext);
+		if (!node->sgprivate->interact) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_SCENE, ("[VRMLJS] Failed to create interact storage\n"));
+			return NULL;
+		}
+	}
 	if (!node->sgprivate->interact->js_binding) {
 		GF_SAFEALLOC(node->sgprivate->interact->js_binding, struct _node_js_binding);
+		if (!node->sgprivate->interact->js_binding) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_SCENE, ("[VRMLJS] Failed to create JS bindings storage\n"));
+			return NULL;
+		}
 		node->sgprivate->interact->js_binding->fields = gf_list_new();
 	}
 	node->sgprivate->flags |= GF_NODE_HAS_BINDING;
@@ -634,17 +737,15 @@ static JSBool SMJS_FUNCTION(loadScript)
 	char *url;
 	GF_Node *node = JS_GetContextPrivate(c);
 	SMJS_ARGS
+	jsval aval;
 	if (!argc || !JSVAL_IS_STRING(argv[0])) return JS_TRUE;
 
 	if ((argc>1) && JSVAL_IS_BOOLEAN(argv[1])) no_complain = (JSVAL_TO_BOOLEAN(argv[1])==JS_TRUE) ? 1 : 0;
 
 	url = SMJS_CHARS(c, argv[0]);
 	if (url) {
-		if ( JSScriptFromFile(node, url, no_complain) == 1) {
-			SMJS_SET_RVAL( BOOLEAN_TO_JSVAL(JS_TRUE) );
-		} else {
-			SMJS_SET_RVAL( BOOLEAN_TO_JSVAL(JS_FALSE) );
-		}
+		JSScriptFromFile(node, url, no_complain, &aval);
+		SMJS_SET_RVAL(aval);
 	}
 	SMJS_FREE(c, url);
 	return JS_TRUE;
@@ -732,18 +833,18 @@ static void on_route_to_object(GF_Node *node, GF_Route *_r)
 	GF_FieldInfo t_info;
 	GF_ScriptPriv *priv;
 	JSObject *obj;
-	GF_RouteToFunction *r = (GF_RouteToFunction *)_r;
+	GF_RouteToScript *r = (GF_RouteToScript *)_r;
 	if (!node) return;
 	priv = gf_node_get_private(node);
 	if (!priv) return;
 
 	if (!r->FromNode) {
 		if (r->obj) {
-//			gf_js_remove_root(priv->js_ctx, &r->obj);
+//			gf_js_remove_root(priv->js_ctx, &r->obj, GF_JSGC_OBJECT);
 			r->obj=NULL;
 		}
 		if ( ! JSVAL_IS_VOID(r->fun)) {
-//			gf_js_remove_root(priv->js_ctx, &r->fun);
+//			gf_js_remove_root(priv->js_ctx, &r->fun, GF_JSGC_OBJECT);
 			r->fun=JSVAL_NULL;
 		}
 		return;
@@ -782,9 +883,7 @@ static void on_route_to_object(GF_Node *node, GF_Route *_r)
 
 	gf_sg_lock_javascript(priv->js_ctx, 0);
 
-#ifdef FORCE_GC
-	MyJSGC(priv->js_ctx);
-#endif
+	do_js_gc(priv->js_ctx, node);
 }
 
 static JSBool SMJS_FUNCTION(addRoute)
@@ -798,7 +897,7 @@ static JSBool SMJS_FUNCTION(addRoute)
 	SMJS_ARGS
 	if (argc!=4) return JS_FALSE;
 
-	if (!JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+	if (!JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
 
 	ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0]));
 	assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
@@ -823,7 +922,7 @@ static JSBool SMJS_FUNCTION(addRoute)
 	if (!JSVAL_IS_OBJECT(argv[2])) return JS_FALSE;
 
 	/*regular route*/
-	if (JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[2]), &js_rt->SFNodeClass, NULL) && JSVAL_IS_STRING(argv[3]) ) {
+	if (GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[2]), &js_rt->SFNodeClass, NULL) && JSVAL_IS_STRING(argv[3]) ) {
 		GF_Route *r;
 		ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[2]));
 		assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
@@ -837,11 +936,11 @@ static JSBool SMJS_FUNCTION(addRoute)
 			f_id2 = atoi(f2+6);
 			e = gf_node_get_field(n2, f_id2, &info);
 		} else {
-			if ((n2->sgprivate->tag==TAG_MPEG4_Script) 
+			if ((n2->sgprivate->tag==TAG_MPEG4_Script)
 #ifndef GPAC_DISABLE_X3D
-				|| (n2->sgprivate->tag==TAG_X3D_Script)
+			        || (n2->sgprivate->tag==TAG_X3D_Script)
 #endif
-				) {
+			   ) {
 				GF_FieldInfo src = info;
 				if (gf_node_get_field_by_name(n2, f2, &info) != GF_OK) {
 					gf_sg_script_field_new(n2, GF_SG_SCRIPT_TYPE_EVENT_IN, src.fieldType, f2);
@@ -858,35 +957,57 @@ static JSBool SMJS_FUNCTION(addRoute)
 	}
 	/*route to object*/
 	else {
-		GF_RouteToFunction *r;
+		u32 i = 0;
+		const char *fun_name;
+		GF_RouteToScript *r = NULL;
 		if (!JSVAL_IS_OBJECT(argv[3]) || !JS_ObjectIsFunction(c, JSVAL_TO_OBJECT(argv[3])) ) return JS_FALSE;
 
-		GF_SAFEALLOC(r, GF_RouteToFunction)
-		if (!r) return JS_FALSE;
-		r->FromNode = n1;
-		r->FromField.fieldIndex = f_id1;
-		gf_node_get_field(r->FromNode, f_id1, &r->FromField);
+		fun_name = JS_GetFunctionName( JS_ValueToFunction(c, argv[3] ) );
+		if (fun_name && n1->sgprivate->interact && n1->sgprivate->interact->routes ) {
+			while ( (r = (GF_RouteToScript*)gf_list_enum(n1->sgprivate->interact->routes, &i) )) {
+				if ( (r->FromNode == n1)
+				        && (r->FromField.fieldIndex == f_id1)
+				        && (r->ToNode == (GF_Node*)JS_GetScript(c))
+				        && !stricmp(r->ToField.name, fun_name)
+				   )
+					break;
+			}
+		}
 
-		r->ToNode = (GF_Node*)JS_GetScript(c);
-		r->ToField.fieldType = GF_SG_VRML_SCRIPT_FUNCTION;
-		r->ToField.on_event_in = on_route_to_object;
-		r->ToField.eventType = GF_SG_EVENT_IN;
-		r->ToField.far_ptr = NULL;
-		r->ToField.name = JS_GetFunctionName( JS_ValueToFunction(c, argv[3] ) );
+		if ( !r ) {
+			GF_SAFEALLOC(r, GF_RouteToScript)
+			if (!r) return JS_FALSE;
+			r->FromNode = n1;
+			r->FromField.fieldIndex = f_id1;
+			gf_node_get_field(r->FromNode, f_id1, &r->FromField);
 
-		r->obj = JSVAL_TO_OBJECT( argv[2] ) ;
-//		gf_js_add_root(c, & r->obj);
+			r->ToNode = (GF_Node*)JS_GetScript(c);
+			r->ToField.fieldType = GF_SG_VRML_SCRIPT_FUNCTION;
+			r->ToField.on_event_in = on_route_to_object;
+			r->ToField.eventType = GF_SG_EVENT_IN;
+			r->ToField.far_ptr = NULL;
+			r->ToField.name = fun_name;
 
-		r->fun = argv[3];
-//		gf_js_add_root(c, &r->fun);
+			r->obj = JSVAL_TO_OBJECT( argv[2] ) ;
+//			gf_js_add_root(c, & r->obj, GF_JSGC_OBJECT);
 
-		r->is_setup = 1;
-		r->graph = n1->sgprivate->scenegraph;
+			r->fun = argv[3];
+//			gf_js_add_root(c, &r->fun, GF_JSGC_OBJECT);
 
-		if (!n1->sgprivate->interact) GF_SAFEALLOC(n1->sgprivate->interact, struct _node_interactive_ext);
-		if (!n1->sgprivate->interact->routes) n1->sgprivate->interact->routes = gf_list_new();
-		gf_list_add(n1->sgprivate->interact->routes, r);
-		gf_list_add(n1->sgprivate->scenegraph->Routes, r);
+			r->is_setup = 1;
+			r->graph = n1->sgprivate->scenegraph;
+
+			if (!n1->sgprivate->interact) {
+				GF_SAFEALLOC(n1->sgprivate->interact, struct _node_interactive_ext);
+				if (!n1->sgprivate->interact) {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_SCENE, ("[VRMLJS] Failed to create interact storage\n"));
+					return JS_FALSE;
+				}
+			}
+			if (!n1->sgprivate->interact->routes) n1->sgprivate->interact->routes = gf_list_new();
+			gf_list_add(n1->sgprivate->interact->routes, r);
+			gf_list_add(n1->sgprivate->scenegraph->Routes, r);
+		}
 	}
 
 	return JS_TRUE;
@@ -905,8 +1026,8 @@ static JSBool SMJS_FUNCTION(deleteRoute)
 	SMJS_ARGS
 	if (argc!=4) return JS_FALSE;
 
-	if (!JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
-	
+	if (!JSVAL_IS_OBJECT(argv[0]) || JSVAL_IS_NULL(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+
 	if (JSVAL_IS_STRING(argv[1]) && JSVAL_IS_NULL(argv[2]) && JSVAL_IS_NULL(argv[3])) {
 		ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0]));
 		assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
@@ -922,7 +1043,7 @@ static JSBool SMJS_FUNCTION(deleteRoute)
 		return JS_TRUE;
 	}
 
-	if (!JSVAL_IS_OBJECT(argv[2]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[2]), &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+	if (!JSVAL_IS_OBJECT(argv[2]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[2]), &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
 	if (!JSVAL_IS_STRING(argv[1]) || !JSVAL_IS_STRING(argv[3])) return JS_FALSE;
 
 	ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0]));
@@ -1070,57 +1191,7 @@ static JSBool SMJS_FUNCTION(createVrmlFromString)
 #endif
 }
 
-static JSBool SMJS_FUNCTION(getOption)
-{
-	JSString *s;
-	GF_JSAPIParam par;
-	GF_Node *sc_node = JS_GetContextPrivate(c);
-	Bool res;
-	SMJS_ARGS
-	if (argc < 2) return JS_FALSE;
-
-	if (!JSVAL_IS_STRING(argv[0])) return JS_FALSE;
-	if (!JSVAL_IS_STRING(argv[1])) return JS_FALSE;
-
-	par.gpac_cfg.section = SMJS_CHARS(c, argv[0]);
-	par.gpac_cfg.key = SMJS_CHARS(c, argv[1]);
-	par.gpac_cfg.key_val = NULL;
-
-	res = ScriptAction(c, NULL, GF_JSAPI_OP_GET_OPT, sc_node->sgprivate->scenegraph->RootNode, &par);
-	SMJS_FREE(c, (char *)par.gpac_cfg.section);
-	SMJS_FREE(c, (char *)par.gpac_cfg.key);
-	if (!res) return JS_FALSE;
-
-	s = JS_NewStringCopyZ(c, par.gpac_cfg.key_val ? (const char *)par.gpac_cfg.key_val : "");
-	if (!s) return JS_FALSE;
-	SMJS_SET_RVAL( STRING_TO_JSVAL(s) );
-	return JS_TRUE;
-}
-
-static JSBool SMJS_FUNCTION(setOption)
-{
-	GF_JSAPIParam par;
-	GF_Node *sc_node = JS_GetContextPrivate(c);
-	Bool res;
-	SMJS_ARGS
-	if (argc < 3) return JS_FALSE;
-
-	if (!JSVAL_IS_STRING(argv[0])) return JS_FALSE;
-	if (!JSVAL_IS_STRING(argv[1])) return JS_FALSE;
-	if (!JSVAL_IS_STRING(argv[2])) return JS_FALSE;
-
-	par.gpac_cfg.section = SMJS_CHARS(c, argv[0]);
-	par.gpac_cfg.key = SMJS_CHARS(c, argv[1]);
-	par.gpac_cfg.key_val = SMJS_CHARS(c, argv[2]);
-
-	res = ScriptAction(c, NULL, GF_JSAPI_OP_SET_OPT, sc_node->sgprivate->scenegraph->RootNode, &par);
-	SMJS_FREE(c, (char *)par.gpac_cfg.section);
-	SMJS_FREE(c, (char *)par.gpac_cfg.key);
-	SMJS_FREE(c, (char *)par.gpac_cfg.key_val);
-
-	if (!res) return JS_FALSE;
-	return JS_TRUE;
-}
+void gf_node_event_out_proto(GF_Node *node, u32 FieldIndex);
 
 void Script_FieldChanged(JSContext *c, GF_Node *parent, GF_JSField *parent_owner, GF_FieldInfo *field)
 {
@@ -1137,11 +1208,11 @@ void Script_FieldChanged(JSContext *c, GF_Node *parent, GF_JSField *parent_owner
 	if (!parent) return;
 
 	script_field = 0;
-	if ((parent->sgprivate->tag == TAG_MPEG4_Script) 
+	if ((parent->sgprivate->tag == TAG_MPEG4_Script)
 #ifndef GPAC_DISABLE_X3D
-		|| (parent->sgprivate->tag == TAG_X3D_Script) 
+	        || (parent->sgprivate->tag == TAG_X3D_Script)
 #endif
-		) {
+	   ) {
 		script_field = 1;
 		if ( (GF_Node *) JS_GetContextPrivate(c) == parent) script_field = 2;
 	}
@@ -1154,9 +1225,18 @@ void Script_FieldChanged(JSContext *c, GF_Node *parent, GF_JSField *parent_owner
 			return;
 		}
 		/*field has changed, set routes...*/
-		if (parent->sgprivate->tag == TAG_ProtoNode)
+		if (parent->sgprivate->tag == TAG_ProtoNode) {
+			GF_ProtoInstance *inst = (GF_ProtoInstance *)parent;
 			gf_sg_proto_propagate_event(parent, field->fieldIndex, (GF_Node*)JS_GetScript(c));
-		else {
+			/* Node exposedField can also be routed to another field */
+			gf_node_event_out_proto(parent, field->fieldIndex);
+
+			//hardcoded protos be implemented in ways not inspecting the node_dirty propagation scheme (eg defining an SFNode in their interface, not linked with the graph).
+			//in this case handle the node as a regular one
+			if (inst->flags & GF_SG_PROTO_HARDCODED) {
+				gf_node_changed_internal(parent, field, 0);
+			}
+		} else {
 			gf_node_event_out(parent, field->fieldIndex);
 			gf_node_changed_internal(parent, field, 0);
 		}
@@ -1179,38 +1259,38 @@ void Script_FieldChanged(JSContext *c, GF_Node *parent, GF_JSField *parent_owner
 
 SMJS_FUNC_PROP_SET( gf_sg_script_eventout_set_prop)
 
-	u32 i;
-	char *eventName;
-	GF_ScriptPriv *script;
-	GF_Node *n;
-	GF_ScriptField *sf;
-	GF_FieldInfo info;
-	jsval idval;
-	JSString *str;
-	JS_IdToValue(c, id, &idval);
-	if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
-	str = SMJS_ID_TO_STRING(id);
-	if (!str) return JS_FALSE;
-	/*avoids gcc warning*/
-	if (!obj) obj=NULL;
+u32 i;
+char *eventName;
+GF_ScriptPriv *script;
+GF_Node *n;
+GF_ScriptField *sf;
+GF_FieldInfo info;
+jsval idval;
+JSString *str;
+JS_IdToValue(c, id, &idval);
+if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+str = SMJS_ID_TO_STRING(id);
+if (!str) return JS_FALSE;
+/*avoids gcc warning*/
+if (!obj) obj=NULL;
 
-	script = JS_GetScriptStack(c);
-	if (!script) return JS_FALSE;
-	n = (GF_Node *) JS_GetScript(c);
+script = JS_GetScriptStack(c);
+if (!script) return JS_FALSE;
+n = (GF_Node *) JS_GetScript(c);
 
-	eventName = SMJS_CHARS_FROM_STRING(c, str);
-	i=0;
-	while ((sf = gf_list_enum(script->fields, &i))) {
-		if (!stricmp(sf->name, eventName)) {
-			gf_node_get_field(n, sf->ALL_index, &info);
-			gf_sg_script_to_node_field(c, *vp, &info, n, NULL);
-			sf->activate_event_out = 1;
-			SMJS_FREE(c, eventName);
-			return JS_TRUE;
-		}
+eventName = SMJS_CHARS_FROM_STRING(c, str);
+i=0;
+while ((sf = gf_list_enum(script->fields, &i))) {
+	if (!stricmp(sf->name, eventName)) {
+		gf_node_get_field(n, sf->ALL_index, &info);
+		gf_sg_script_to_node_field(c, *vp, &info, n, NULL);
+		sf->activate_event_out = 1;
+		SMJS_FREE(c, eventName);
+		return JS_TRUE;
 	}
-	SMJS_FREE(c, eventName);
-	return JS_FALSE;
+}
+SMJS_FREE(c, eventName);
+return JS_FALSE;
 }
 
 
@@ -1251,7 +1331,7 @@ static GFINLINE void sffield_toString(char *str, void *f_ptr, u32 fieldType)
 	case GF_SG_VRML_SFCOLOR:
 	{
 		SFColor val = * ((SFColor *) f_ptr);
-		sprintf(temp, "%f %f %f", val.red, val.green, val.blue);
+		sprintf(temp, "%f %f %f", FIX2FLT(val.red), FIX2FLT(val.green), FIX2FLT(val.blue));
 		strcat(str, temp);
 		break;
 	}
@@ -1273,17 +1353,16 @@ static void JS_ObjectDestroyed(JSContext *c, JSObject *obj, GF_JSField *ptr, Boo
 	if (ptr) {
 		/*if ptr is a node, remove node binding*/
 		if (ptr->node
-			&& ptr->node->sgprivate->interact
-			&& ptr->node->sgprivate->interact->js_binding
-			&& (ptr->node->sgprivate->interact->js_binding->node == ptr)
-		) {
-				ptr->node->sgprivate->interact->js_binding->node = NULL;
+		        && ptr->node->sgprivate->interact
+		        && ptr->node->sgprivate->interact->js_binding
+		        && (ptr->node->sgprivate->interact->js_binding->node == ptr)
+		   ) {
+			ptr->node->sgprivate->interact->js_binding->node = NULL;
 		}
 
 		/*if ptr is a field, remove field binding from parent*/
 		if (ptr->owner && ptr->owner->sgprivate->interact && ptr->owner->sgprivate->interact->js_binding) {
-			int res = gf_list_del_item(ptr->owner->sgprivate->interact->js_binding->fields, ptr);
-			assert(res>=0);
+			gf_list_del_item(ptr->owner->sgprivate->interact->js_binding->fields, ptr);
 		}
 
 
@@ -1296,7 +1375,11 @@ static void JS_ObjectDestroyed(JSContext *c, JSObject *obj, GF_JSField *ptr, Boo
 		*/
 		if (ptr->obj && is_js_call) {
 			GF_ScriptPriv *priv;
-			if (ptr->js_ctx) c = ptr->js_ctx;
+			if (ptr->js_ctx) {
+				if (gf_list_find(js_rt->allocated_contexts, ptr->js_ctx) < 0)
+					return;
+				c = ptr->js_ctx;
+			}
 			priv = JS_GetScriptStack(c);
 			gf_list_del_item(priv->js_cache, obj);
 		}
@@ -1339,7 +1422,7 @@ static JSBool SMJS_FUNCTION(field_toString)
 				break;
 			case GF_SG_VRML_MFFLOAT:
 			case GF_SG_VRML_MFTIME:
-				JS_ValueToNumber(c, item, &d);
+				SMJS_GET_NUMBER(item, d);
 				sprintf(temp, "%g", d);
 				strcat(str, temp);
 				break;
@@ -1350,7 +1433,7 @@ static JSBool SMJS_FUNCTION(field_toString)
 				strcat(str, str_val);
 				SMJS_FREE(c, str_val);
 			}
-				break;
+			break;
 			default:
 				if (JSVAL_IS_OBJECT(item)) {
 					GF_JSField *sf = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(item));
@@ -1390,7 +1473,7 @@ static JSBool SMJS_FUNCTION(SFNodeConstructor)
 		SMJS_SET_RVAL( OBJECT_TO_JSVAL(obj) );
 		return JS_TRUE;
 	}
-	if (!JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+	if (!GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
 
 	ID = 0;
 	node_name = SMJS_CHARS(c, argv[0]);
@@ -1419,7 +1502,7 @@ locate_proto:
 			SMJS_FREE(c, node_name);
 			return JS_FALSE;
 		}
-		/*OK, instanciate proto code*/
+		/*OK, instantiate proto code*/
 		if (gf_sg_proto_load_code(new_node) != GF_OK) {
 			gf_node_unregister(new_node, NULL);
 			SMJS_FREE(c, node_name);
@@ -1444,7 +1527,7 @@ locate_proto:
 		}
 		gf_node_init(new_node);
 	}
-	
+
 	SMJS_FREE(c, node_name);
 
 	obj = node_get_binding(priv, new_node, 1);
@@ -1463,9 +1546,9 @@ static void node_finalize_ex(JSContext *c, JSObject * obj, Bool is_js_call)
 	if (ptr) {
 		JS_GetScript(ptr->js_ctx ? ptr->js_ctx : c);
 		if (ptr->node
-			/*num_instances may be 0 if the node is the script being destroyed*/
-			&& ptr->node->sgprivate->num_instances
-			) {
+		        /*num_instances may be 0 if the node is the script being destroyed*/
+		        && ptr->node->sgprivate->num_instances
+		   ) {
 
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_SCRIPT, ("[VRML JS] unregistering node %s (%s)\n", gf_node_get_name(ptr->node), gf_node_get_class_name(ptr->node)));
 			//gf_node_unregister(ptr->node, (ptr->node==parent) ? NULL : parent);
@@ -1477,127 +1560,128 @@ static void node_finalize_ex(JSContext *c, JSObject * obj, Bool is_js_call)
 
 static DECL_FINALIZE(node_finalize)
 
-	node_finalize_ex(c, obj, 1);
+node_finalize_ex(c, obj, 1);
 }
 
 static SMJS_FUNC_PROP_GET(node_getProperty)
 
-	GF_Node *n;
-	u32 index;
-	JSString *str;
-	GF_FieldInfo info;
-	GF_JSField *ptr;
-	GF_ScriptPriv *priv;
+GF_Node *n;
+u32 index;
+JSString *str;
+GF_FieldInfo info;
+GF_JSField *ptr;
+GF_ScriptPriv *priv;
 
-	if (! JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
-	ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
-	n = * ((GF_Node **)ptr->field.far_ptr);
-	priv = JS_GetScriptStack(c);
+if (! GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) )
+	return JS_FALSE;
+ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
+n = * ((GF_Node **)ptr->field.far_ptr);
+priv = JS_GetScriptStack(c);
 
-	if (n && SMJS_ID_IS_STRING(id) && ( (str = SMJS_ID_TO_STRING(id)) != 0) ) {
-		char *fieldName = SMJS_CHARS_FROM_STRING(c, str);
-		if (!strnicmp(fieldName, "toString", 8)) {
-			SMJS_FREE(c, fieldName);
-			return JS_TRUE;
-		}
-		/*fieldID indexing*/
-		if (!strnicmp(fieldName, "_field", 6)) {
-			index = atoi(fieldName+6);
-			if ( gf_node_get_field(n, index, &info) == GF_OK) {
-				*vp = gf_sg_script_to_smjs_field(priv, &info, n, 0);
-				SMJS_FREE(c, fieldName);
-				return JS_TRUE;
-			}
-		} else if ( gf_node_get_field_by_name(n, fieldName, &info) == GF_OK) {
+if (n && SMJS_ID_IS_STRING(id) && ( (str = SMJS_ID_TO_STRING(id)) != 0) ) {
+	char *fieldName = SMJS_CHARS_FROM_STRING(c, str);
+	if (!strnicmp(fieldName, "toString", 8)) {
+		SMJS_FREE(c, fieldName);
+		return JS_TRUE;
+	}
+	/*fieldID indexing*/
+	if (!strnicmp(fieldName, "_field", 6)) {
+		index = atoi(fieldName+6);
+		if ( gf_node_get_field(n, index, &info) == GF_OK) {
 			*vp = gf_sg_script_to_smjs_field(priv, &info, n, 0);
 			SMJS_FREE(c, fieldName);
 			return JS_TRUE;
 		}
-
-		if (!strcmp(fieldName, "_bounds")) {
-			GF_JSAPIParam par;
-			par.bbox.is_set = 0;
-			if (ScriptAction(c, n->sgprivate->scenegraph, GF_JSAPI_OP_GET_LOCAL_BBOX, (GF_Node *)n, &par) ) {
-				JSObject *_obj = JS_NewObject(priv->js_ctx, &js_rt->AnyClass, 0, 0);
-				Float x, y, w, h;
-				x = y = w = h = 0;
-				if (par.bbox.is_set) {
-					x = FIX2FLT(par.bbox.min_edge.x);
-					y = FIX2FLT(par.bbox.min_edge.y);
-					w = FIX2FLT(par.bbox.max_edge.x - par.bbox.min_edge.x);
-					h = FIX2FLT(par.bbox.max_edge.y - par.bbox.min_edge.y);
-				}
-				JS_DefineProperty(priv->js_ctx, _obj, "x", JS_MAKE_DOUBLE(c, x), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
-				JS_DefineProperty(priv->js_ctx, _obj, "y", JS_MAKE_DOUBLE(c, y), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
-				JS_DefineProperty(priv->js_ctx, _obj, "width", JS_MAKE_DOUBLE(c, w), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
-				JS_DefineProperty(priv->js_ctx, _obj, "height", JS_MAKE_DOUBLE(c, h), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
-				*vp = OBJECT_TO_JSVAL(_obj);
-				SMJS_FREE(c, fieldName);
-				return JS_TRUE;
-			}
-		}
+	} else if ( gf_node_get_field_by_name(n, fieldName, &info) == GF_OK) {
+		*vp = gf_sg_script_to_smjs_field(priv, &info, n, 0);
 		SMJS_FREE(c, fieldName);
 		return JS_TRUE;
-    }
+	}
 
-	return JS_FALSE;
+	if (!strcmp(fieldName, "_bounds")) {
+		GF_JSAPIParam par;
+		par.bbox.is_set = 0;
+		if (ScriptAction(c, n->sgprivate->scenegraph, GF_JSAPI_OP_GET_LOCAL_BBOX, (GF_Node *)n, &par) ) {
+			JSObject *_obj = JS_NewObject(priv->js_ctx, &js_rt->AnyClass._class, 0, 0);
+			Float x, y, w, h;
+			x = y = w = h = 0;
+			if (par.bbox.is_set) {
+				x = FIX2FLT(par.bbox.min_edge.x);
+				y = FIX2FLT(par.bbox.min_edge.y);
+				w = FIX2FLT(par.bbox.max_edge.x - par.bbox.min_edge.x);
+				h = FIX2FLT(par.bbox.max_edge.y - par.bbox.min_edge.y);
+			}
+			JS_DefineProperty(priv->js_ctx, _obj, "x", JS_MAKE_DOUBLE(c, x), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
+			JS_DefineProperty(priv->js_ctx, _obj, "y", JS_MAKE_DOUBLE(c, y), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
+			JS_DefineProperty(priv->js_ctx, _obj, "width", JS_MAKE_DOUBLE(c, w), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
+			JS_DefineProperty(priv->js_ctx, _obj, "height", JS_MAKE_DOUBLE(c, h), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
+			*vp = OBJECT_TO_JSVAL(_obj);
+			SMJS_FREE(c, fieldName);
+			return JS_TRUE;
+		}
+	}
+	SMJS_FREE(c, fieldName);
+	return JS_TRUE;
+}
+
+return JS_FALSE;
 }
 
 static SMJS_FUNC_PROP_SET( node_setProperty)
 
-	GF_Node *n;
-	GF_FieldInfo info;
-	u32 index;
-	char *fieldname;
-	GF_JSField *ptr;
+GF_Node *n;
+GF_FieldInfo info;
+u32 index;
+char *fieldname;
+GF_JSField *ptr;
 
-	if (! JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
-	ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+if (! GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 
-	/*this is the prototype*/
-	if (!ptr) {
-		if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
-		return JS_TRUE;
-	}
+/*this is the prototype*/
+if (!ptr) {
+	if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+	return JS_TRUE;
+}
 
-	assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
-	n = * ((GF_Node **)ptr->field.far_ptr);
+assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
+n = * ((GF_Node **)ptr->field.far_ptr);
 
-	if (n && SMJS_ID_IS_STRING(id)) {
-		JSString *str = SMJS_ID_TO_STRING(id);
-		fieldname = SMJS_CHARS_FROM_STRING(c, str);
+if (n && SMJS_ID_IS_STRING(id)) {
+	JSString *str = SMJS_ID_TO_STRING(id);
+	fieldname = SMJS_CHARS_FROM_STRING(c, str);
 
-		/*fieldID indexing*/
-		if (!strnicmp(fieldname, "_field", 6)) {
-			index = atoi(fieldname+6);
+	/*fieldID indexing*/
+	if (!strnicmp(fieldname, "_field", 6)) {
+		index = atoi(fieldname+6);
+		SMJS_FREE(c, fieldname);
+		if ( gf_node_get_field(n, index, &info) != GF_OK) {
 			SMJS_FREE(c, fieldname);
-			if ( gf_node_get_field(n, index, &info) != GF_OK) {
-				SMJS_FREE(c, fieldname);
-				return JS_TRUE;
-			}
-		} else {
-			if (gf_node_get_field_by_name(n, fieldname, &info) != GF_OK) {
-				/*VRML style*/
-				if (!strnicmp(fieldname, "set_", 4)) {
-					if (gf_node_get_field_by_name(n, fieldname + 4, &info) != GF_OK) {
-						SMJS_FREE(c, fieldname);
-						return JS_TRUE;
-					}
-				} else {
+			return JS_TRUE;
+		}
+	} else {
+		if (gf_node_get_field_by_name(n, fieldname, &info) != GF_OK) {
+			/*VRML style*/
+			if (!strnicmp(fieldname, "set_", 4)) {
+				if (gf_node_get_field_by_name(n, fieldname + 4, &info) != GF_OK) {
 					SMJS_FREE(c, fieldname);
 					return JS_TRUE;
 				}
+			} else {
+				SMJS_FREE(c, fieldname);
+				return JS_TRUE;
 			}
 		}
-		SMJS_FREE(c, fieldname);
-
-		if (gf_node_get_tag(n)==TAG_ProtoNode)
-			gf_sg_proto_mark_field_loaded(n, &info);
-
-		gf_sg_script_to_node_field(c, *vp, &info, n, ptr);
 	}
-	return JS_TRUE;
+	SMJS_FREE(c, fieldname);
+
+	if (gf_node_get_tag(n)==TAG_ProtoNode)
+		gf_sg_proto_mark_field_loaded(n, &info);
+
+	gf_sg_script_to_node_field(c, *vp, &info, n, ptr);
+}
+return JS_TRUE;
 }
 static JSBool SMJS_FUNCTION(node_toString)
 {
@@ -1608,7 +1692,7 @@ static JSBool SMJS_FUNCTION(node_toString)
 	GF_JSField *f;
 	const char *name;
 	SMJS_OBJ
-	if (! JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+	if (! GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
 	f = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 	if (!f) return JS_FALSE;
 
@@ -1636,7 +1720,7 @@ static JSBool SMJS_FUNCTION(node_getTime)
 	GF_Node *n;
 	GF_JSField *f;
 	SMJS_OBJ
-	if (! JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+	if (! GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
 	f = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 	if (!f) return JS_FALSE;
 
@@ -1649,12 +1733,12 @@ static JSBool SMJS_FUNCTION(node_getTime)
 /* Generic field destructor */
 static DECL_FINALIZE(field_finalize)
 
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	JS_ObjectDestroyed(c, obj, ptr, 1);
-	if (!ptr) return;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+JS_ObjectDestroyed(c, obj, ptr, 1);
+if (!ptr) return;
 
-	if (ptr->field_ptr) gf_sg_vrml_field_pointer_del(ptr->field_ptr, ptr->field.fieldType);
-	gf_free(ptr);
+if (ptr->field_ptr) gf_sg_vrml_field_pointer_del(ptr->field_ptr, ptr->field.fieldType);
+gf_free(ptr);
 }
 
 
@@ -1688,7 +1772,7 @@ static JSBool SMJS_FUNCTION(SFImageConstructor)
 	SMJS_OBJ_CONSTRUCTOR(&js_rt->SFImageClass)
 	if (argc<4) return 0;
 	if (!JSVAL_IS_INT(argv[0]) || !JSVAL_IS_INT(argv[1]) || !JSVAL_IS_INT(argv[2])) return JS_FALSE;
-	if (!JSVAL_IS_OBJECT(argv[3]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[3]), &js_rt->MFInt32Class, NULL)) return JS_FALSE;
+	if (!JSVAL_IS_OBJECT(argv[3]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[3]), &js_rt->MFInt32Class, NULL)) return JS_FALSE;
 	w = JSVAL_TO_INT(argv[0]);
 	h = JSVAL_TO_INT(argv[1]);
 	nbComp = JSVAL_TO_INT(argv[2]);
@@ -1699,88 +1783,104 @@ static JSBool SMJS_FUNCTION(SFImageConstructor)
 
 static SMJS_FUNC_PROP_GET(image_getProperty)
 
-	GF_ScriptPriv *priv = JS_GetScriptStack(c);
-	GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	SFImage *sfi;
-	if (!val) return JS_FALSE;
-	sfi = (SFImage*)val->field.far_ptr;
-	if (SMJS_ID_IS_INT(id)) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0: *vp = INT_TO_JSVAL( sfi->width ); break;
-		case 1: *vp = INT_TO_JSVAL( sfi->height); break;
-		case 2: *vp = INT_TO_JSVAL( sfi->numComponents ); break;
-		case 3:
-		{
-			u32 i, len;
-			JSObject *an_obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFInt32Class, priv->js_obj);
-			len = sfi->width*sfi->height*sfi->numComponents;
-			for (i=0; i<len; i++) {
-				jsval newVal = INT_TO_JSVAL(sfi->pixels[i]);
-				JS_SetElement(priv->js_ctx, an_obj, (jsint) i, &newVal);
-			}
-		}
-			break;
-		default:
-			return JS_TRUE;
+GF_ScriptPriv *priv = JS_GetScriptStack(c);
+GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+SFImage *sfi;
+if (!val) return JS_FALSE;
+sfi = (SFImage*)val->field.far_ptr;
+if (SMJS_ID_IS_INT(id)) {
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		*vp = INT_TO_JSVAL( sfi->width );
+		break;
+	case 1:
+		*vp = INT_TO_JSVAL( sfi->height);
+		break;
+	case 2:
+		*vp = INT_TO_JSVAL( sfi->numComponents );
+		break;
+	case 3:
+	{
+		u32 i, len;
+		JSObject *an_obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFInt32Class, priv->js_obj);
+		len = sfi->width*sfi->height*sfi->numComponents;
+		for (i=0; i<len; i++) {
+			jsval newVal = INT_TO_JSVAL(sfi->pixels[i]);
+			JS_SetElement(priv->js_ctx, an_obj, (jsint) i, &newVal);
 		}
 	}
-	return JS_TRUE;
+	break;
+	default:
+		return JS_TRUE;
+	}
+}
+return JS_TRUE;
 }
 
 static SMJS_FUNC_PROP_SET( image_setProperty)
 
-	u32 ival;
-	Bool changed = 0;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	SFImage *sfi;
+u32 ival;
+Bool changed = 0;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+SFImage *sfi;
 
-	/*this is the prototype*/
-	if (!ptr) {
-		if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
-		return JS_TRUE;
+/*this is the prototype*/
+if (!ptr) {
+	if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+	return JS_TRUE;
+}
+sfi = (SFImage*)ptr->field.far_ptr;
+
+if (SMJS_ID_IS_INT(id) && SMJS_ID_TO_INT(id) >= 0 && SMJS_ID_TO_INT(id) < 4) {
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		ival = JSVAL_TO_INT(*vp);
+		changed = ! (sfi->width == ival);
+		sfi->width = ival;
+		if (changed && sfi->pixels) {
+			gf_free(sfi->pixels);
+			sfi->pixels = NULL;
+		}
+		break;
+	case 1:
+		ival =  JSVAL_TO_INT(*vp);
+		changed = ! (sfi->height == ival);
+		sfi->height = ival;
+		if (changed && sfi->pixels) {
+			gf_free(sfi->pixels);
+			sfi->pixels = NULL;
+		}
+		break;
+	case 2:
+		ival =  JSVAL_TO_INT(*vp);
+		changed = ! (sfi->numComponents == ival);
+		sfi->numComponents = ival;
+		if (changed && sfi->pixels) {
+			gf_free(sfi->pixels);
+			sfi->pixels = NULL;
+		}
+		break;
+	case 3:
+	{
+		MFInt32 *pixels;
+		u32 len, i;
+		if (!JSVAL_IS_OBJECT(*vp) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(*vp), &js_rt->MFInt32Class, NULL)) return JS_FALSE;
+		pixels = (MFInt32 *) ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp)))->field.far_ptr;
+		if (sfi->pixels) gf_free(sfi->pixels);
+		len = sfi->width*sfi->height*sfi->numComponents;
+		sfi->pixels = (unsigned char *) gf_malloc(sizeof(char)*len);
+		len = MAX(len, pixels->count);
+		for (i=0; i<len; i++) sfi->pixels[i] = (u8) pixels->vals[i];
+		changed = 1;
+		break;
 	}
-	sfi = (SFImage*)ptr->field.far_ptr;
-
-	if (SMJS_ID_IS_INT(id) && SMJS_ID_TO_INT(id) >= 0 && SMJS_ID_TO_INT(id) < 4) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0:
-			ival = JSVAL_TO_INT(*vp);
-			changed = ! (sfi->width == ival);
-			sfi->width = ival;
-			if (changed && sfi->pixels) { gf_free(sfi->pixels); sfi->pixels = NULL; }
-			break;
-		case 1:
-			ival =  JSVAL_TO_INT(*vp);
-			changed = ! (sfi->height == ival);
-			sfi->height = ival;
-			if (changed && sfi->pixels) { gf_free(sfi->pixels); sfi->pixels = NULL; }
-			break;
-		case 2:
-			ival =  JSVAL_TO_INT(*vp);
-			changed = ! (sfi->numComponents == ival);
-			sfi->numComponents = ival;
-			if (changed && sfi->pixels) { gf_free(sfi->pixels); sfi->pixels = NULL; }
-			break;
-		case 3:
-		{
-			MFInt32 *pixels;
-			u32 len, i;
-			if (!JSVAL_IS_OBJECT(*vp) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(*vp), &js_rt->MFInt32Class, NULL)) return JS_FALSE;
-			pixels = (MFInt32 *) ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp)))->field.far_ptr;
-			if (sfi->pixels) gf_free(sfi->pixels);
-			len = sfi->width*sfi->height*sfi->numComponents;
-			sfi->pixels = (char *) gf_malloc(sizeof(char)*len);
-			len = MAX(len, pixels->count);
-			for (i=0; i<len; i++) sfi->pixels[i] = (u8) pixels->vals[i];
-			changed = 1;
-			break;
-		}
-		default: return JS_FALSE;
-		}
-		if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
-		return JS_TRUE;
-    }
-	return JS_FALSE;
+	default:
+		return JS_FALSE;
+	}
+	if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
+	return JS_TRUE;
+}
+return JS_FALSE;
 }
 
 /*SFVec2f class functions */
@@ -1802,58 +1902,70 @@ static JSBool SMJS_FUNCTION(SFVec2fConstructor)
 	jsdouble x = 0.0, y = 0.0;
 	SMJS_ARGS
 	SMJS_OBJ_CONSTRUCTOR(&js_rt->SFVec2fClass)
-	if (argc > 0) JS_ValueToNumber(c, argv[0], &x);
-	if (argc > 1) JS_ValueToNumber(c, argv[1], &y);
+	if (argc > 0) SMJS_GET_NUMBER(argv[0], x);
+	if (argc > 1) SMJS_GET_NUMBER(argv[1], y);
+
 	SFVec2f_Create(c, obj, FLT2FIX( x), FLT2FIX( y));
 	return JS_TRUE;
 }
 static SMJS_FUNC_PROP_GET(vec2f_getProperty)
 
-	GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 
-	if (SMJS_ID_IS_INT(id)) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec2f*)val->field.far_ptr)->x)); break;
-		case 1: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec2f*)val->field.far_ptr)->y)); break;
-		default: return JS_TRUE;
-		}
+if (SMJS_ID_IS_INT(id)) {
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec2f*)val->field.far_ptr)->x));
+		break;
+	case 1:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec2f*)val->field.far_ptr)->y));
+		break;
+	default:
+		return JS_TRUE;
 	}
-	return JS_TRUE;
+}
+return JS_TRUE;
 }
 
 static SMJS_FUNC_PROP_SET(vec2f_setProperty)
 
-	jsdouble d;
-	Fixed v;
-	Bool changed = 0;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+jsdouble d;
+Fixed v;
+Bool changed = 0;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 
-	/*this is the prototype*/
-	if (!ptr) {
-		if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
-		return JS_TRUE;
+/*this is the prototype*/
+if (!ptr) {
+	if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+	return JS_TRUE;
+}
+
+if (SMJS_ID_IS_INT(id)) {
+	if (! JSVAL_IS_NUMBER(*vp)) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[VRML JS] Value is not a number while assigning SFVec2f\n"));
+		return JS_FALSE;
 	}
 
-	if (SMJS_ID_IS_INT(id)) {
-		JS_ValueToNumber(c, *vp, &d);
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0:
-			v = FLT2FIX( d);
-			changed = ! ( ((SFVec2f*)ptr->field.far_ptr)->x == v);
-			((SFVec2f*)ptr->field.far_ptr)->x = v;
-			break;
-		case 1:
-			v = FLT2FIX( d);
-			changed = ! ( ((SFVec2f*)ptr->field.far_ptr)->y == v);
-			((SFVec2f*)ptr->field.far_ptr)->y = v;
-			break;
-		default:
-			return JS_TRUE;
-		}
-		if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
+	SMJS_GET_NUMBER(*vp, d);
+
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		v = FLT2FIX( d);
+		changed = ! ( ((SFVec2f*)ptr->field.far_ptr)->x == v);
+		((SFVec2f*)ptr->field.far_ptr)->x = v;
+		break;
+	case 1:
+		v = FLT2FIX( d);
+		changed = ! ( ((SFVec2f*)ptr->field.far_ptr)->y == v);
+		((SFVec2f*)ptr->field.far_ptr)->y = v;
+		break;
+	default:
 		return JS_TRUE;
-    }
-	return JS_FALSE;
+	}
+	if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
+	return JS_TRUE;
+}
+return JS_FALSE;
 }
 
 static JSBool SMJS_FUNCTION(vec2f_add)
@@ -1862,12 +1974,12 @@ static JSBool SMJS_FUNCTION(vec2f_add)
 	JSObject *pNew;
 	SMJS_ARGS
 	SMJS_OBJ
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec2fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec2fClass, NULL))
 		return JS_FALSE;
 
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-    v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec2fClass, 0, SMJS_GET_PARENT(c, obj));
+	v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
+	pNew = JS_NewObject(c, &js_rt->SFVec2fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec2f_Create(c, pNew, v1->x + v2->x, v1->y + v2->y);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -1878,12 +1990,12 @@ static JSBool SMJS_FUNCTION(vec2f_subtract)
 	JSObject *pNew;
 	SMJS_ARGS
 	SMJS_OBJ
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec2fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec2fClass, NULL))
 		return JS_FALSE;
 
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-    v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec2fClass, 0, SMJS_GET_PARENT(c, obj));
+	v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
+	pNew = JS_NewObject(c, &js_rt->SFVec2fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec2f_Create(c, pNew, v1->x - v2->x, v1->y - v2->y);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -1894,7 +2006,7 @@ static JSBool SMJS_FUNCTION(vec2f_negate)
 	JSObject *pNew;
 	SMJS_OBJ
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec2fClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFVec2fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec2f_Create(c, pNew, -v1->x , -v1->y );
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -1909,8 +2021,8 @@ static JSBool SMJS_FUNCTION(vec2f_multiply)
 	SMJS_OBJ
 	if (argc<=0) return JS_FALSE;
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec2fClass, 0, SMJS_GET_PARENT(c, obj));
-	JS_ValueToNumber(c, argv[0], &d );
+	pNew = JS_NewObject(c, &js_rt->SFVec2fClass._class, 0, SMJS_GET_PARENT(c, obj));
+	SMJS_GET_NUMBER(argv[0], d );
 	v = FLT2FIX( d);
 	SFVec2f_Create(c, pNew, gf_mulfix(v1->x , v), gf_mulfix(v1->y, v) );
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
@@ -1926,8 +2038,8 @@ static JSBool SMJS_FUNCTION(vec2f_divide)
 	SMJS_OBJ
 	if (argc<=0) return JS_FALSE;
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec2fClass, 0, SMJS_GET_PARENT(c, obj));
-	JS_ValueToNumber(c, argv[0], &d );
+	pNew = JS_NewObject(c, &js_rt->SFVec2fClass._class, 0, SMJS_GET_PARENT(c, obj));
+	SMJS_GET_NUMBER(argv[0], d );
 	v = FLT2FIX(d);
 	SFVec2f_Create(c, pNew, gf_divfix(v1->x, v),  gf_divfix(v1->y, v));
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
@@ -1951,7 +2063,7 @@ static JSBool SMJS_FUNCTION(vec2f_normalize)
 	SMJS_OBJ
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
 	res = gf_v2d_len(v1);
-	pNew = JS_NewObject(c, &js_rt->SFVec2fClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFVec2fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec2f_Create(c, pNew, gf_divfix(v1->x, res), gf_divfix(v1->y, res) );
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -1961,11 +2073,11 @@ static JSBool SMJS_FUNCTION(vec2f_dot)
 	SFVec2f *v1, *v2;
 	SMJS_OBJ
 	SMJS_ARGS
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec2fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec2fClass, NULL))
 		return JS_FALSE;
 
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-    v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
+	v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
 	SMJS_SET_RVAL( JS_MAKE_DOUBLE(c, FIX2FLT( gf_mulfix(v1->x, v2->x) + gf_mulfix(v1->y, v2->y) ) ) );
 	return JS_TRUE;
 }
@@ -1991,61 +2103,77 @@ static JSBool SMJS_FUNCTION(SFVec3fConstructor)
 	SMJS_ARGS
 	jsdouble x = 0.0, y = 0.0, z = 0.0;
 	SMJS_OBJ_CONSTRUCTOR(&js_rt->SFVec3fClass)
-	if (argc > 0) JS_ValueToNumber(c, argv[0], &x);
-	if (argc > 1) JS_ValueToNumber(c, argv[1], &y);
-	if (argc > 2) JS_ValueToNumber(c, argv[2], &z);
+	if (argc > 0) SMJS_GET_NUMBER(argv[0], x);
+	if (argc > 1) SMJS_GET_NUMBER(argv[1], y);
+	if (argc > 2) SMJS_GET_NUMBER(argv[2], z);
 	SFVec3f_Create(c, obj, FLT2FIX( x), FLT2FIX( y), FLT2FIX( z));
 	return JS_TRUE;
 }
 static SMJS_FUNC_PROP_GET(vec3f_getProperty)
 
-	GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	if (SMJS_ID_IS_INT(id)) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec3f*)val->field.far_ptr)->x) ); break;
-		case 1: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec3f*)val->field.far_ptr)->y) ); break;
-		case 2: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec3f*)val->field.far_ptr)->z) ); break;
-		default: return JS_TRUE;
-		}
+GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+if (SMJS_ID_IS_INT(id)) {
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec3f*)val->field.far_ptr)->x) );
+		break;
+	case 1:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec3f*)val->field.far_ptr)->y) );
+		break;
+	case 2:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFVec3f*)val->field.far_ptr)->z) );
+		break;
+	default:
+		return JS_TRUE;
 	}
-	return JS_TRUE;
+}
+return JS_TRUE;
 }
 static SMJS_FUNC_PROP_SET( vec3f_setProperty )
 
-	jsdouble d;
-	Fixed v;
-	Bool changed = 0;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+jsdouble d;
+Fixed v;
+Bool changed = 0;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 
-	/*this is the prototype*/
-	if (!ptr) {
-		if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+/*this is the prototype*/
+if (!ptr) {
+	if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+	return JS_TRUE;
+}
+
+if (! JSVAL_IS_NUMBER(*vp)) {
+	GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[VRML JS] Value is not a number while assigning SFVec3f\n"));
+	return JS_FALSE;
+}
+
+if (SMJS_ID_IS_INT(id) && SMJS_ID_TO_INT(id) >= 0 && SMJS_ID_TO_INT(id) < 3) {
+
+	SMJS_GET_NUMBER(*vp, d);
+
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		v = FLT2FIX( d);
+		changed = ! ( ((SFVec3f*)ptr->field.far_ptr)->x == v);
+		((SFVec3f*)ptr->field.far_ptr)->x = v;
+		break;
+	case 1:
+		v = FLT2FIX( d);
+		changed = ! ( ((SFVec3f*)ptr->field.far_ptr)->y == v);
+		((SFVec3f*)ptr->field.far_ptr)->y = v;
+		break;
+	case 2:
+		v = FLT2FIX( d);
+		changed = ! ( ((SFVec3f*)ptr->field.far_ptr)->z == v);
+		((SFVec3f*)ptr->field.far_ptr)->z = v;
+		break;
+	default:
 		return JS_TRUE;
 	}
-
-	if (SMJS_ID_IS_INT(id) && SMJS_ID_TO_INT(id) >= 0 && SMJS_ID_TO_INT(id) < 3 && JS_ValueToNumber(c, *vp, &d)) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0:
-			v = FLT2FIX( d);
-			changed = ! ( ((SFVec3f*)ptr->field.far_ptr)->x == v);
-			((SFVec3f*)ptr->field.far_ptr)->x = v;
-			break;
-		case 1:
-			v = FLT2FIX( d);
-			changed = ! ( ((SFVec3f*)ptr->field.far_ptr)->y == v);
-			((SFVec3f*)ptr->field.far_ptr)->y = v;
-			break;
-		case 2:
-			v = FLT2FIX( d);
-			changed = ! ( ((SFVec3f*)ptr->field.far_ptr)->z == v);
-			((SFVec3f*)ptr->field.far_ptr)->z = v;
-			break;
-		default: return JS_TRUE;
-		}
-		if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
-		return JS_TRUE;
-    }
-	return JS_FALSE;
+	if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
+	return JS_TRUE;
+}
+return JS_FALSE;
 }
 static JSBool SMJS_FUNCTION(vec3f_add)
 {
@@ -2053,12 +2181,12 @@ static JSBool SMJS_FUNCTION(vec3f_add)
 	JSObject *pNew;
 	SMJS_ARGS
 	SMJS_OBJ
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
 		return JS_FALSE;
 
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-    v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
+	v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec3f_Create(c, pNew, v1->x + v2->x, v1->y + v2->y, v1->z + v2->z);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2069,12 +2197,12 @@ static JSBool SMJS_FUNCTION(vec3f_subtract)
 	JSObject *pNew;
 	SMJS_ARGS
 	SMJS_OBJ
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
 		return JS_FALSE;
 
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-    v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
+	v2 = ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec3f_Create(c, pNew, v1->x - v2->x, v1->y - v2->y, v1->z - v2->z);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2085,7 +2213,7 @@ static JSBool SMJS_FUNCTION(vec3f_negate)
 	JSObject *pNew;
 	SMJS_OBJ
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec3f_Create(c, pNew, -v1->x , -v1->y , -v1->z );
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2101,8 +2229,8 @@ static JSBool SMJS_FUNCTION(vec3f_multiply)
 	if (argc<=0) return JS_FALSE;
 
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
-	JS_ValueToNumber(c, argv[0], &d );
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
+	SMJS_GET_NUMBER(argv[0], d );
 	v = FLT2FIX(d);
 	SFVec3f_Create(c, pNew, gf_mulfix(v1->x, v), gf_mulfix(v1->y, v), gf_mulfix(v1->z, v) );
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
@@ -2118,8 +2246,8 @@ static JSBool SMJS_FUNCTION(vec3f_divide)
 	SMJS_ARGS
 	if (argc<=0) return JS_FALSE;
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
-	JS_ValueToNumber(c, argv[0], &d );
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
+	SMJS_GET_NUMBER(argv[0], d );
 	v = FLT2FIX(d);
 	SFVec3f_Create(c, pNew, gf_divfix(v1->x, v), gf_divfix(v1->y, v), gf_divfix(v1->z, v));
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
@@ -2142,7 +2270,7 @@ static JSBool SMJS_FUNCTION(vec3f_normalize)
 	SMJS_OBJ
 	v1 = * (SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
 	gf_vec_norm(&v1);
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec3f_Create(c, pNew, v1.x, v1.y, v1.z);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2152,11 +2280,11 @@ static JSBool SMJS_FUNCTION(vec3f_dot)
 	SFVec3f v1, v2;
 	SMJS_OBJ
 	SMJS_ARGS
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
 		return JS_FALSE;
 
 	v1 = *(SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-    v2 = *(SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
+	v2 = *(SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
 	SMJS_SET_RVAL( JS_MAKE_DOUBLE(c, FIX2FLT(gf_vec_dot(v1, v2)) ) );
 	return JS_TRUE;
 }
@@ -2166,12 +2294,12 @@ static JSBool SMJS_FUNCTION(vec3f_cross)
 	JSObject *pNew;
 	SMJS_ARGS
 	SMJS_OBJ
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
 		return JS_FALSE;
 
 	v1 = * (SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-    v2 = * (SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
+	v2 = * (SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	v3 = gf_vec_cross(v1, v2);
 	SFVec3f_Create(c, pNew, v3.x, v3.y, v3.z);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
@@ -2210,94 +2338,110 @@ static JSBool SMJS_FUNCTION(SFRotationConstructor)
 		return JS_TRUE;
 	}
 	if ((argc>0) && JSVAL_IS_NUMBER(argv[0])) {
-		if (argc > 0) JS_ValueToNumber(c, argv[0], &x);
-		if (argc > 1) JS_ValueToNumber(c, argv[1], &y);
-		if (argc > 2) JS_ValueToNumber(c, argv[2], &z);
-		if (argc > 3) JS_ValueToNumber(c, argv[3], &a);
+		if (argc > 0) SMJS_GET_NUMBER(argv[0], x);
+		if (argc > 1) SMJS_GET_NUMBER(argv[1], y);
+		if (argc > 2) SMJS_GET_NUMBER(argv[2], z);
+		if (argc > 3) SMJS_GET_NUMBER(argv[3], a);
 		SFRotation_Create(c, obj, FLT2FIX(x), FLT2FIX(y), FLT2FIX(z), FLT2FIX(a));
 		return JS_TRUE;
 	}
 	if (argc!=2) return JS_FALSE;
 	if (!JSVAL_IS_OBJECT(argv[0])) return JS_FALSE;
 	an_obj = JSVAL_TO_OBJECT(argv[0]);
-	if (! JS_InstanceOf(c, an_obj, &js_rt->SFVec3fClass, NULL)) return JS_FALSE;
+	if (! GF_JS_InstanceOf(c, an_obj, &js_rt->SFVec3fClass, NULL)) return JS_FALSE;
 	v1 = * (SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, an_obj))->field.far_ptr;
 	if (JSVAL_IS_DOUBLE(argv[1])) {
-		JS_ValueToNumber(c, argv[1], &a);
+		SMJS_GET_NUMBER(argv[1], a);
 		SFRotation_Create(c, obj, v1.x, v1.y, v1.z, FLT2FIX(a));
 		return JS_TRUE;
 	}
 
 	if (!JSVAL_IS_OBJECT(argv[1])) return JS_FALSE;
 	an_obj = JSVAL_TO_OBJECT(argv[1]);
-	if (!JS_InstanceOf(c, an_obj, &js_rt->SFVec3fClass, NULL)) return JS_FALSE;
+	if (!GF_JS_InstanceOf(c, an_obj, &js_rt->SFVec3fClass, NULL)) return JS_FALSE;
 	v2 = * (SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, an_obj))->field.far_ptr;
 	l1 = gf_vec_len(v1);
 	l2 = gf_vec_len(v2);
 	dot = gf_divfix(gf_vec_dot(v1, v2), gf_mulfix(l1, l2) );
 	a = gf_atan2(gf_sqrt(FIX_ONE - gf_mulfix(dot, dot)), dot);
 	SFRotation_Create(c, obj, gf_mulfix(v1.y, v2.z) - gf_mulfix(v2.y, v1.z),
-								gf_mulfix(v1.z, v2.x) - gf_mulfix(v2.z, v1.x),
-								gf_mulfix(v1.x, v2.y) - gf_mulfix(v2.x, v1.y),
-								FLT2FIX(a));
+	                  gf_mulfix(v1.z, v2.x) - gf_mulfix(v2.z, v1.x),
+	                  gf_mulfix(v1.x, v2.y) - gf_mulfix(v2.x, v1.y),
+	                  FLT2FIX(a));
 	return JS_TRUE;
 }
 
 static SMJS_FUNC_PROP_GET(rot_getProperty)
 
-	GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	if (SMJS_ID_IS_INT(id)) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFRotation*)val->field.far_ptr)->x)); break;
-		case 1: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFRotation*)val->field.far_ptr)->y)); break;
-		case 2: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFRotation*)val->field.far_ptr)->z)); break;
-		case 3: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFRotation*)val->field.far_ptr)->q)); break;
-		default: return JS_TRUE;
-		}
+GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+if (SMJS_ID_IS_INT(id)) {
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFRotation*)val->field.far_ptr)->x));
+		break;
+	case 1:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFRotation*)val->field.far_ptr)->y));
+		break;
+	case 2:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFRotation*)val->field.far_ptr)->z));
+		break;
+	case 3:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFRotation*)val->field.far_ptr)->q));
+		break;
+	default:
+		return JS_TRUE;
 	}
-	return JS_TRUE;
+}
+return JS_TRUE;
 }
 static SMJS_FUNC_PROP_SET( rot_setProperty )
 
-	jsdouble d;
-	Fixed v;
-	Bool changed = 0;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+jsdouble d;
+Fixed v;
+Bool changed = 0;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 
-	/*this is the prototype*/
-	if (!ptr) {
-		if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+/*this is the prototype*/
+if (!ptr) {
+	if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+	return JS_TRUE;
+}
+
+if (! JSVAL_IS_NUMBER(*vp)) {
+	GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[VRML JS] Value is not a number while assigning SFVec3f\n"));
+	return JS_FALSE;
+}
+if (SMJS_ID_IS_INT(id) && SMJS_ID_TO_INT(id) >= 0 && SMJS_ID_TO_INT(id) < 4 ) {
+	SMJS_GET_NUMBER(*vp, d);
+
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		v = FLT2FIX(d);
+		changed = ! ( ((SFRotation*)ptr->field.far_ptr)->x == v);
+		((SFRotation*)ptr->field.far_ptr)->x = v;
+		break;
+	case 1:
+		v = FLT2FIX(d);
+		changed = ! ( ((SFRotation*)ptr->field.far_ptr)->y == v);
+		((SFRotation*)ptr->field.far_ptr)->y = v;
+		break;
+	case 2:
+		v = FLT2FIX(d);
+		changed = ! ( ((SFRotation*)ptr->field.far_ptr)->z == v);
+		((SFRotation*)ptr->field.far_ptr)->z = v;
+		break;
+	case 3:
+		v = FLT2FIX(d);
+		changed = ! ( ((SFRotation*)ptr->field.far_ptr)->q == v);
+		((SFRotation*)ptr->field.far_ptr)->q = v;
+		break;
+	default:
 		return JS_TRUE;
 	}
-
-	if (SMJS_ID_IS_INT(id) && SMJS_ID_TO_INT(id) >= 0 && SMJS_ID_TO_INT(id) < 4 && JS_ValueToNumber(c, *vp, &d)) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0:
-			v = FLT2FIX(d);
-			changed = ! ( ((SFRotation*)ptr->field.far_ptr)->x == v);
-			((SFRotation*)ptr->field.far_ptr)->x = v;
-			break;
-		case 1:
-			v = FLT2FIX(d);
-			changed = ! ( ((SFRotation*)ptr->field.far_ptr)->y == v);
-			((SFRotation*)ptr->field.far_ptr)->y = v;
-			break;
-		case 2:
-			v = FLT2FIX(d);
-			changed = ! ( ((SFRotation*)ptr->field.far_ptr)->z == v);
-			((SFRotation*)ptr->field.far_ptr)->z = v;
-			break;
-		case 3:
-			v = FLT2FIX(d);
-			changed = ! ( ((SFRotation*)ptr->field.far_ptr)->q == v);
-			((SFRotation*)ptr->field.far_ptr)->q = v;
-			break;
-		default: return JS_TRUE;
-		}
-		if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
-		return JS_TRUE;
-    }
-	return JS_FALSE;
+	if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
+	return JS_TRUE;
+}
+return JS_FALSE;
 }
 static JSBool SMJS_FUNCTION(rot_getAxis)
 {
@@ -2305,7 +2449,7 @@ static JSBool SMJS_FUNCTION(rot_getAxis)
 	JSObject *pNew;
 	SMJS_OBJ
 	r = * (SFRotation *) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec3f_Create(c, pNew, r.x, r.y, r.z);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2316,7 +2460,7 @@ static JSBool SMJS_FUNCTION(rot_inverse)
 	JSObject *pNew;
 	SMJS_OBJ
 	r = * (SFRotation *) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	pNew = JS_NewObject(c, &js_rt->SFRotationClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFRotationClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFRotation_Create(c, pNew, r.x, r.y, r.z, r.q-GF_PI);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2330,7 +2474,7 @@ static JSBool SMJS_FUNCTION(rot_multiply)
 	SMJS_OBJ
 	SMJS_ARGS
 
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFRotationClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFRotationClass, NULL))
 		return JS_FALSE;
 
 	r1 = * (SFRotation *) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
@@ -2340,7 +2484,7 @@ static JSBool SMJS_FUNCTION(rot_multiply)
 	q1 = gf_quat_multiply(&q1, &q2);
 	r1 = gf_quat_to_rotation(&q1);
 
-	pNew = JS_NewObject(c, &js_rt->SFRotationClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFRotationClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFRotation_Create(c, pNew, r1.x, r1.y, r1.z, r1.q);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2355,7 +2499,7 @@ static JSBool SMJS_FUNCTION(rot_multVec)
 	SMJS_ARGS
 	if (argc<=0) return JS_FALSE;
 
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
 		return JS_FALSE;
 
 	r = *(SFRotation *) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
@@ -2363,7 +2507,7 @@ static JSBool SMJS_FUNCTION(rot_multVec)
 	gf_mx_init(mx);
 	gf_mx_add_rotation(&mx, r.q, r.x, r.y, r.z);
 	gf_mx_apply_vec(&mx, &v);
-	pNew = JS_NewObject(c, &js_rt->SFVec3fClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFVec3fClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFVec3f_Create(c, pNew, v.x, v.y, v.z);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2377,7 +2521,7 @@ static JSBool SMJS_FUNCTION(rot_setAxis)
 	SMJS_ARGS
 	if (argc<=0) return JS_FALSE;
 
-	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
+	if (argc<=0 || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFVec3fClass, NULL))
 		return JS_FALSE;
 
 	ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
@@ -2385,8 +2529,8 @@ static JSBool SMJS_FUNCTION(rot_setAxis)
 
 	v = *(SFVec3f *) ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
 
-	r->x = v.x; 	 
-	r->y = v.y; 	 
+	r->x = v.x;
+	r->y = v.y;
 	r->z = v.z;
 	Script_FieldChanged(c, NULL, ptr, NULL);
 	return JS_TRUE;
@@ -2401,16 +2545,16 @@ static JSBool SMJS_FUNCTION(rot_slerp)
 	SMJS_OBJ
 	if (argc<=1) return JS_FALSE;
 
-	if (!JSVAL_IS_DOUBLE(argv[1]) || !JSVAL_IS_OBJECT(argv[0]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFRotationClass, NULL)) return JS_FALSE;
+	if (!JSVAL_IS_DOUBLE(argv[1]) || !JSVAL_IS_OBJECT(argv[0]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[0]), &js_rt->SFRotationClass, NULL)) return JS_FALSE;
 
 	v1 = *(SFRotation *) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
 	v2 = *(SFRotation *) ((GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(argv[0])))->field.far_ptr;
-	JS_ValueToNumber(c, argv[1], &d );
+	SMJS_GET_NUMBER(argv[1], d );
 	q1 = gf_quat_from_rotation(v1);
 	q2 = gf_quat_from_rotation(v2);
 	q1 = gf_quat_slerp(q1, q2, FLT2FIX( d));
 	res = gf_quat_to_rotation(&q1);
-	pNew = JS_NewObject(c, &js_rt->SFRotationClass, 0, SMJS_GET_PARENT(c, obj));
+	pNew = JS_NewObject(c, &js_rt->SFRotationClass._class, 0, SMJS_GET_PARENT(c, obj));
 	SFRotation_Create(c, pNew, res.x, res.y, res.z, res.q);
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(pNew) );
 	return JS_TRUE;
@@ -2436,62 +2580,74 @@ static JSBool SMJS_FUNCTION(SFColorConstructor)
 	SMJS_ARGS
 	jsdouble r = 0.0, g = 0.0, b = 0.0;
 	SMJS_OBJ_CONSTRUCTOR(&js_rt->SFColorClass)
-	if (argc > 0) JS_ValueToNumber(c, argv[0], &r);
-	if (argc > 1) JS_ValueToNumber(c, argv[1], &g);
-	if (argc > 2) JS_ValueToNumber(c, argv[2], &b);
+	if (argc > 0) SMJS_GET_NUMBER(argv[0], r);
+	if (argc > 1) SMJS_GET_NUMBER(argv[1], g);
+	if (argc > 2) SMJS_GET_NUMBER(argv[2], b);
 	SFColor_Create(c, obj, FLT2FIX( r), FLT2FIX( g), FLT2FIX( b));
 	return JS_TRUE;
 }
 static SMJS_FUNC_PROP_GET( color_getProperty )
 
-	GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	if (SMJS_ID_IS_INT(id)) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFColor*)val->field.far_ptr)->red)); break;
-		case 1: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFColor*)val->field.far_ptr)->green)); break;
-		case 2: *vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFColor*)val->field.far_ptr)->blue)); break;
-		default: return JS_TRUE;
-		}
+GF_JSField *val = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+if (SMJS_ID_IS_INT(id)) {
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFColor*)val->field.far_ptr)->red));
+		break;
+	case 1:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFColor*)val->field.far_ptr)->green));
+		break;
+	case 2:
+		*vp = JS_MAKE_DOUBLE(c, FIX2FLT( ((SFColor*)val->field.far_ptr)->blue));
+		break;
+	default:
+		return JS_TRUE;
 	}
-	return JS_TRUE;
+}
+return JS_TRUE;
 }
 
 static SMJS_FUNC_PROP_SET(color_setProperty)
 
-	jsdouble d;
-	Fixed v;
-	Bool changed = 0;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	/*this is the prototype*/
-	if (!ptr) {
-		if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+jsdouble d;
+Fixed v;
+Bool changed = 0;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+/*this is the prototype*/
+if (!ptr) {
+	if (! SMJS_ID_IS_STRING(id)) return JS_FALSE;
+	return JS_TRUE;
+}
+
+if (! JSVAL_IS_NUMBER(*vp)) {
+	GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[VRML JS] Value is not a number while assigning SFVec3f\n"));
+	return JS_FALSE;
+}
+if (SMJS_ID_IS_INT(id) && SMJS_ID_TO_INT(id) >= 0 && SMJS_ID_TO_INT(id) < 3 ) {
+	SMJS_GET_NUMBER(*vp, d);
+	switch (SMJS_ID_TO_INT(id)) {
+	case 0:
+		v = FLT2FIX(d);
+		changed = ! ( ((SFColor*)ptr->field.far_ptr)->red == v);
+		((SFColor*)ptr->field.far_ptr)->red = v;
+		break;
+	case 1:
+		v = FLT2FIX(d);
+		changed = ! ( ((SFColor*)ptr->field.far_ptr)->green == v);
+		((SFColor*)ptr->field.far_ptr)->green = v;
+		break;
+	case 2:
+		v = FLT2FIX(d);
+		changed = ! ( ((SFColor*)ptr->field.far_ptr)->blue == v);
+		((SFColor*)ptr->field.far_ptr)->blue = v;
+		break;
+	default:
 		return JS_TRUE;
 	}
-
-	if (SMJS_ID_IS_INT(id) && SMJS_ID_TO_INT(id) >= 0 && SMJS_ID_TO_INT(id) < 3 && JS_ValueToNumber(c, *vp, &d)) {
-		switch (SMJS_ID_TO_INT(id)) {
-		case 0:
-			v = FLT2FIX(d);
-			changed = ! ( ((SFColor*)ptr->field.far_ptr)->red == v);
-			((SFColor*)ptr->field.far_ptr)->red = v;
-			break;
-		case 1:
-			v = FLT2FIX(d);
-			changed = ! ( ((SFColor*)ptr->field.far_ptr)->green == v);
-			((SFColor*)ptr->field.far_ptr)->green = v;
-			break;
-		case 2:
-			v = FLT2FIX(d);
-			changed = ! ( ((SFColor*)ptr->field.far_ptr)->blue == v);
-			((SFColor*)ptr->field.far_ptr)->blue = v;
-			break;
-		default:
-			return JS_TRUE;
-		}
-		if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
-		return JS_TRUE;
-    }
-	return JS_FALSE;
+	if (changed) Script_FieldChanged(c, NULL, ptr, NULL);
+	return JS_TRUE;
+}
+return JS_FALSE;
 }
 static JSBool SMJS_FUNCTION(color_setHSV)
 {
@@ -2502,9 +2658,9 @@ static JSBool SMJS_FUNCTION(color_setHSV)
 	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 	if (argc != 3) return JS_FALSE;
 	v1 = ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
-	JS_ValueToNumber( c, argv[0], &h);
-	JS_ValueToNumber( c, argv[1], &s);
-	JS_ValueToNumber( c, argv[2], &v);
+	SMJS_GET_NUMBER(argv[0], h);
+	SMJS_GET_NUMBER(argv[1], s);
+	SMJS_GET_NUMBER(argv[2], v);
 	hsv.red = FLT2FIX( h);
 	hsv.green = FLT2FIX( s);
 	hsv.blue = FLT2FIX( v);
@@ -2533,13 +2689,15 @@ static JSBool SMJS_FUNCTION(color_getHSV)
 
 static void setup_js_array(JSContext *c, JSObject *obj, GF_JSField *ptr, uintN argc, jsval *argv)
 {
-	GF_ScriptPriv *priv = JS_GetScriptStack(c);
+//	GF_ScriptPriv *priv = JS_GetScriptStack(c);
 	ptr->obj = obj;
 	ptr->js_list = JS_NewArrayObject(c, (jsint) argc, argv);
 
-	gf_js_add_root(c, &ptr->js_list, GF_JSGC_OBJECT);
-	ptr->is_rooted = 1;
-	gf_list_add(priv->js_cache, obj);
+	/*
+		gf_js_add_root(c, &ptr->js_list, GF_JSGC_OBJECT);
+		ptr->is_rooted = 1;
+		gf_list_add(priv->js_cache, obj);
+	*/
 }
 
 #define MFARRAY_CONSTRUCTOR(__classp, _fieldType)	\
@@ -2552,7 +2710,7 @@ static void setup_js_array(JSContext *c, JSObject *obj, GF_JSField *ptr, uintN a
 	SMJS_SET_PRIVATE(c, obj, ptr);	\
 	SMJS_SET_RVAL( OBJECT_TO_JSVAL(obj) );	\
 	return obj == 0 ? JS_FALSE : JS_TRUE;	\
-
+ 
 static JSBool SMJS_FUNCTION(MFBoolConstructor)
 {
 	MFARRAY_CONSTRUCTOR(&js_rt->MFBoolClass, GF_SG_VRML_MFBOOL);
@@ -2611,325 +2769,347 @@ static void array_finalize_ex(JSContext *c, JSObject *obj, Bool is_js_call)
 
 static DECL_FINALIZE(array_finalize)
 
-	array_finalize_ex(c, obj, 1);
+array_finalize_ex(c, obj, 1);
 }
 
 static SMJS_FUNC_PROP_GET( array_getElement )
 
-	u32 i;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	if (SMJS_ID_IS_INT(id)) {
-		i = SMJS_ID_TO_INT(id);
-		if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
-			GF_Node *node = gf_node_list_get_child(*(GF_ChildNodeItem **)ptr->field.far_ptr, i);
-			JSObject *anobj = node ? node_get_binding(JS_GetScriptStack(c), node, 0) : NULL;
-			if (anobj) *vp = OBJECT_TO_JSVAL(anobj);
-		} else {
-			JS_GetElement(c, ptr->js_list, (jsint) i, vp);
-		}
+u32 i;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+if (SMJS_ID_IS_INT(id)) {
+	i = SMJS_ID_TO_INT(id);
+	if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
+		GF_Node *node = gf_node_list_get_child(*(GF_ChildNodeItem **)ptr->field.far_ptr, i);
+		JSObject *anobj = node ? node_get_binding(JS_GetScriptStack(c), node, 0) : NULL;
+		if (anobj) *vp = OBJECT_TO_JSVAL(anobj);
+	} else {
+		JS_GetElement(c, ptr->js_list, (jsint) i, vp);
 	}
-	return JS_TRUE;
+}
+return JS_TRUE;
 }
 
 
 //this could be overloaded for each MF type...
 static SMJS_FUNC_PROP_SET(array_setElement)
 
-	u32 ind;
-	jsuint len;
-	jsdouble d;
-	GF_JSField *from;
-	JSBool ret;
-	JSClass *the_sf_class = NULL;
-	JSString *str;
-	char *str_val;
-	void *sf_slot;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	ind = SMJS_ID_TO_INT(id);
+u32 ind;
+jsuint len;
+jsdouble d;
+GF_JSField *from;
+JSBool ret;
+GF_JSClass *the_sf_class = NULL;
+JSString *str;
+char *str_val;
+void *sf_slot;
+Bool is_append = 0;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+ind = SMJS_ID_TO_INT(id);
 
-	ret = JS_GetArrayLength(c, ptr->js_list, &len);
+ret = JS_GetArrayLength(c, ptr->js_list, &len);
+if (ret==JS_FALSE) return JS_FALSE;
+
+if (!ptr->js_list && gf_sg_vrml_is_sf_field(ptr->field.fieldType)) return JS_FALSE;
+
+
+switch (ptr->field.fieldType) {
+case GF_SG_VRML_MFVEC2F:
+	the_sf_class = &js_rt->SFVec2fClass;
+	break;
+case GF_SG_VRML_MFVEC3F:
+	the_sf_class = &js_rt->SFVec3fClass;
+	break;
+case GF_SG_VRML_MFCOLOR:
+	the_sf_class = &js_rt->SFColorClass;
+	break;
+case GF_SG_VRML_MFROTATION:
+	the_sf_class = &js_rt->SFRotationClass;
+	break;
+}
+/*dynamic expend*/
+if (ind>=len) {
+	is_append = 1;
+	ret = JS_SetArrayLength(c, ptr->js_list, len+1);
 	if (ret==JS_FALSE) return JS_FALSE;
-
-	if (gf_sg_vrml_is_sf_field(ptr->field.fieldType)) return JS_FALSE;
-
-
-	switch (ptr->field.fieldType) {
-	case GF_SG_VRML_MFVEC2F: the_sf_class = &js_rt->SFVec2fClass; break;
-	case GF_SG_VRML_MFVEC3F: the_sf_class = &js_rt->SFVec3fClass; break;
-	case GF_SG_VRML_MFCOLOR: the_sf_class = &js_rt->SFColorClass; break;
-	case GF_SG_VRML_MFROTATION: the_sf_class = &js_rt->SFRotationClass; break;
-	}
-	/*dynamic expend*/
-	if (ind>=len) {
-		ret = JS_SetArrayLength(c, ptr->js_list, len+1);
-		if (ret==JS_FALSE) return JS_FALSE;
-		while (len<ind) {
-			jsval a_val;
-			switch (ptr->field.fieldType) {
-			case GF_SG_VRML_MFBOOL:
-				a_val = BOOLEAN_TO_JSVAL(0);
-				break;
-			case GF_SG_VRML_MFINT32:
-				a_val = INT_TO_JSVAL(0);
-				break;
-			case GF_SG_VRML_MFFLOAT:
-			case GF_SG_VRML_MFTIME:
-				a_val = JS_MAKE_DOUBLE(c, 0);
-				break;
-			case GF_SG_VRML_MFSTRING:
-			case GF_SG_VRML_MFURL:
-				a_val = STRING_TO_JSVAL( JS_NewStringCopyZ(c, "") );
-				break;
-			case GF_SG_VRML_MFVEC2F:
-			case GF_SG_VRML_MFVEC3F:
-			case GF_SG_VRML_MFCOLOR:
-			case GF_SG_VRML_MFROTATION:
-				a_val = OBJECT_TO_JSVAL( SMJS_CONSTRUCT_OBJECT(c, the_sf_class, obj) );
-				break;
-			default:
-				a_val = INT_TO_JSVAL(0);
-				break;
-			}
-
-			if (ptr->field.fieldType!=GF_SG_VRML_MFNODE) {
-				gf_sg_vrml_mf_insert(ptr->field.far_ptr, ptr->field.fieldType, &sf_slot, len);
-				JS_SetElement(c, ptr->js_list, len, &a_val);
-			}
-			len++;
+	while (len<ind) {
+		jsval a_val;
+		switch (ptr->field.fieldType) {
+		case GF_SG_VRML_MFBOOL:
+			a_val = BOOLEAN_TO_JSVAL(0);
+			break;
+		case GF_SG_VRML_MFINT32:
+			a_val = INT_TO_JSVAL(0);
+			break;
+		case GF_SG_VRML_MFFLOAT:
+		case GF_SG_VRML_MFTIME:
+			a_val = JS_MAKE_DOUBLE(c, 0);
+			break;
+		case GF_SG_VRML_MFSTRING:
+		case GF_SG_VRML_MFURL:
+			a_val = STRING_TO_JSVAL( JS_NewStringCopyZ(c, "") );
+			break;
+		case GF_SG_VRML_MFVEC2F:
+		case GF_SG_VRML_MFVEC3F:
+		case GF_SG_VRML_MFCOLOR:
+		case GF_SG_VRML_MFROTATION:
+			a_val = OBJECT_TO_JSVAL( SMJS_CONSTRUCT_OBJECT(c, the_sf_class, obj) );
+			break;
+		default:
+			a_val = INT_TO_JSVAL(0);
+			break;
 		}
-		if (ptr->field.far_ptr && (ptr->field.fieldType!=GF_SG_VRML_MFNODE))
-			gf_sg_vrml_mf_insert(ptr->field.far_ptr, ptr->field.fieldType, &sf_slot, ind);
-	}
 
-	if (ptr->field.far_ptr && (ptr->field.fieldType!=GF_SG_VRML_MFNODE)) {
-		u32 items = ((GenMFField *)ptr->field.far_ptr)->count;
-		while (ind>=items) {
-			gf_sg_vrml_mf_insert(ptr->field.far_ptr, ptr->field.fieldType, &sf_slot, ind);
-			items++;
+		if (ptr->field.fieldType!=GF_SG_VRML_MFNODE) {
+			gf_sg_vrml_mf_insert(ptr->field.far_ptr, ptr->field.fieldType, &sf_slot, len);
+			JS_SetElement(c, ptr->js_list, len, &a_val);
 		}
+		len++;
 	}
+	if (ptr->field.far_ptr && (ptr->field.fieldType!=GF_SG_VRML_MFNODE))
+		gf_sg_vrml_mf_insert(ptr->field.far_ptr, ptr->field.fieldType, &sf_slot, ind);
+}
 
-	/*assign object*/
-	if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
-		if (JSVAL_IS_VOID(*vp) || JSVAL_IS_NULL(*vp) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(*vp), &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
-	} else if (the_sf_class) {
-		if (JSVAL_IS_VOID(*vp)) return JS_FALSE;
-		if (!JS_InstanceOf(c, JSVAL_TO_OBJECT(*vp), the_sf_class, NULL) ) return JS_FALSE;
-	} else if (ptr->field.fieldType==GF_SG_VRML_MFBOOL) {
-		if (!JSVAL_IS_BOOLEAN(*vp)) return JS_FALSE;
-	} else if (ptr->field.fieldType==GF_SG_VRML_MFINT32) {
-		if (!JSVAL_IS_INT(*vp)) return JS_FALSE;
-	} else if (ptr->field.fieldType==GF_SG_VRML_MFFLOAT) {
-		if (!JSVAL_IS_NUMBER(*vp)) return JS_FALSE;
-	} else if (ptr->field.fieldType==GF_SG_VRML_MFTIME) {
-		if (!JSVAL_IS_NUMBER(*vp)) return JS_FALSE;
-	} else if (ptr->field.fieldType==GF_SG_VRML_MFSTRING) {
-		if (!JSVAL_IS_STRING(*vp)) return JS_FALSE;
-	} else if (ptr->field.fieldType==GF_SG_VRML_MFURL) {
-		if (!JSVAL_IS_STRING(*vp)) return JS_FALSE;
+if (ptr->field.far_ptr && (ptr->field.fieldType!=GF_SG_VRML_MFNODE)) {
+	u32 items = ((GenMFField *)ptr->field.far_ptr)->count;
+	while (ind>=items) {
+		gf_sg_vrml_mf_insert(ptr->field.far_ptr, ptr->field.fieldType, &sf_slot, ind);
+		items++;
 	}
+}
+
+/*assign object*/
+if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
+	JSObject *o;
+	if (JSVAL_IS_VOID(*vp)) return JS_FALSE;
+	if (JSVAL_IS_NULL(*vp) ) return JS_FALSE;
+	o = JSVAL_TO_OBJECT(*vp);
+	if (!GF_JS_InstanceOf(c, o, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+} else if (the_sf_class) {
+	if (JSVAL_IS_VOID(*vp)) return JS_FALSE;
+	if (!GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(*vp), the_sf_class, NULL) ) return JS_FALSE;
+} else if (ptr->field.fieldType==GF_SG_VRML_MFBOOL) {
+	if (!JSVAL_IS_BOOLEAN(*vp)) return JS_FALSE;
+} else if (ptr->field.fieldType==GF_SG_VRML_MFINT32) {
+	if (!JSVAL_IS_INT(*vp)) return JS_FALSE;
+} else if (ptr->field.fieldType==GF_SG_VRML_MFFLOAT) {
+	if (!JSVAL_IS_NUMBER(*vp)) return JS_FALSE;
+} else if (ptr->field.fieldType==GF_SG_VRML_MFTIME) {
+	if (!JSVAL_IS_NUMBER(*vp)) return JS_FALSE;
+} else if (ptr->field.fieldType==GF_SG_VRML_MFSTRING) {
+	if (!JSVAL_IS_STRING(*vp)) return JS_FALSE;
+} else if (ptr->field.fieldType==GF_SG_VRML_MFURL) {
+	if (!JSVAL_IS_STRING(*vp)) return JS_FALSE;
+}
 
 
-	/*rewrite MFNode entry*/
-	if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
-		GF_Node *prev_n, *new_n;
-
-		if (!ptr->owner) return JS_TRUE;
-
-		/*get new node*/
-		from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
-		new_n = *(GF_Node**)from->field.far_ptr;
-
-#if 0
-		anobj = node_get_binding(JS_GetScriptStack(c), from->node, 0);
-
-		/*add it to the new object if needed*/
-		ret = JS_SetElement(c, ptr->js_list, ind, vp);
-#endif
-
-		/*get and delete previous node if any, but unregister later*/
-		prev_n = gf_node_list_del_child_idx( (GF_ChildNodeItem **)ptr->field.far_ptr, ind);
-
-		if (new_n) {
-			gf_node_list_insert_child( (GF_ChildNodeItem **)ptr->field.far_ptr , new_n, ind);
-			gf_node_register(new_n, ptr->owner);
-
-			/*node created from script and inserted in the tree, root it*/
-			if (!from->is_rooted)
-				node_get_binding(JS_GetScriptStack(c), new_n, 0);
-		}
-		/*unregister previous node*/
-		if (prev_n) gf_node_unregister(prev_n, ptr->owner);
-
-		Script_FieldChanged(c, NULL, ptr, NULL);
-		return JS_TRUE;
-	}
-
-	ret = JS_SetElement(c, ptr->js_list, ind, vp);
-	if (ret==JS_FALSE) return JS_FALSE;
+/*rewrite MFNode entry*/
+if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
+	GF_Node *prev_n, *new_n;
 
 	if (!ptr->owner) return JS_TRUE;
 
-	/*rewrite MF slot*/
-	switch (ptr->field.fieldType) {
-	case GF_SG_VRML_MFBOOL:
-		((MFBool *)ptr->field.far_ptr)->vals[ind] = (Bool) JSVAL_TO_BOOLEAN(*vp);
-		break;
-	case GF_SG_VRML_MFINT32:
-		((MFInt32 *)ptr->field.far_ptr)->vals[ind] = (s32) JSVAL_TO_INT(*vp);
-		break;
-	case GF_SG_VRML_MFFLOAT:
-		JS_ValueToNumber(c, *vp, &d);
-		((MFFloat *)ptr->field.far_ptr)->vals[ind] = FLT2FIX(d);
-		break;
-	case GF_SG_VRML_MFTIME:
-		JS_ValueToNumber(c, *vp, &d);
-		((MFTime *)ptr->field.far_ptr)->vals[ind] = d;
-		break;
-	case GF_SG_VRML_MFSTRING:
-		if (((MFString *)ptr->field.far_ptr)->vals[ind]) {
-			gf_free(((MFString *)ptr->field.far_ptr)->vals[ind]);
-			((MFString *)ptr->field.far_ptr)->vals[ind] = NULL;
-		}
-		str = JSVAL_IS_STRING(*vp) ? JSVAL_TO_STRING(*vp) : JS_ValueToString(c, *vp);
-		str_val = SMJS_CHARS_FROM_STRING(c, str);
-		((MFString *)ptr->field.far_ptr)->vals[ind] = gf_strdup(str_val);
-		SMJS_FREE(c, str_val);
-		break;
+	/*get new node*/
+	from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
+	new_n = *(GF_Node**)from->field.far_ptr;
+	prev_n = NULL;
 
-	case GF_SG_VRML_MFURL:
-		if (((MFURL *)ptr->field.far_ptr)->vals[ind].url) {
-			gf_free(((MFURL *)ptr->field.far_ptr)->vals[ind].url);
-			((MFURL *)ptr->field.far_ptr)->vals[ind].url = NULL;
-		}
-		str = JSVAL_IS_STRING(*vp) ? JSVAL_TO_STRING(*vp) : JS_ValueToString(c, *vp);
-		str_val = SMJS_CHARS_FROM_STRING(c, str);
-		((MFURL *)ptr->field.far_ptr)->vals[ind].url = gf_strdup(str_val);
-		((MFURL *)ptr->field.far_ptr)->vals[ind].OD_ID = 0;
-		SMJS_FREE(c, str_val);
-		break;
-
-	case GF_SG_VRML_MFVEC2F:
-		from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
-		gf_sg_vrml_field_copy(& ((MFVec2f *)ptr->field.far_ptr)->vals[ind], from->field.far_ptr, from->field.fieldType);
-		break;
-	case GF_SG_VRML_MFVEC3F:
-		from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
-		gf_sg_vrml_field_copy(& ((MFVec3f *)ptr->field.far_ptr)->vals[ind], from->field.far_ptr, from->field.fieldType);
-		break;
-	case GF_SG_VRML_MFROTATION:
-		from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
-		gf_sg_vrml_field_copy(& ((MFRotation *)ptr->field.far_ptr)->vals[ind], from->field.far_ptr, from->field.fieldType);
-		break;
-	case GF_SG_VRML_MFCOLOR:
-		from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
-		gf_sg_vrml_field_copy(& ((MFColor *)ptr->field.far_ptr)->vals[ind], from->field.far_ptr, from->field.fieldType);
-		break;
+	if (!is_append) {
+		/*get and delete previous node if any, but unregister later*/
+		prev_n = gf_node_list_del_child_idx( (GF_ChildNodeItem **)ptr->field.far_ptr, ind);
 	}
+
+	if (new_n) {
+		gf_node_list_insert_child( (GF_ChildNodeItem **)ptr->field.far_ptr , new_n, ind);
+		gf_node_register(new_n, ptr->owner);
+
+		/*node created from script and inserted in the tree, root it*/
+		if (!from->is_rooted)
+			node_get_binding(JS_GetScriptStack(c), new_n, 0);
+	}
+	/*unregister previous node*/
+	if (prev_n) gf_node_unregister(prev_n, ptr->owner);
 
 	Script_FieldChanged(c, NULL, ptr, NULL);
 	return JS_TRUE;
 }
 
+ret = JS_SetElement(c, ptr->js_list, ind, vp);
+if (ret==JS_FALSE) return JS_FALSE;
+
+if (!ptr->owner) return JS_TRUE;
+if (!ptr->field.far_ptr) return JS_FALSE;
+
+/*rewrite MF slot*/
+switch (ptr->field.fieldType) {
+case GF_SG_VRML_MFBOOL:
+	((MFBool *)ptr->field.far_ptr)->vals[ind] = (Bool) JSVAL_TO_BOOLEAN(*vp);
+	break;
+case GF_SG_VRML_MFINT32:
+	((MFInt32 *)ptr->field.far_ptr)->vals[ind] = (s32) JSVAL_TO_INT(*vp);
+	break;
+case GF_SG_VRML_MFFLOAT:
+	SMJS_GET_NUMBER(*vp, d);
+	((MFFloat *)ptr->field.far_ptr)->vals[ind] = FLT2FIX(d);
+	break;
+case GF_SG_VRML_MFTIME:
+	SMJS_GET_NUMBER(*vp, d);
+	((MFTime *)ptr->field.far_ptr)->vals[ind] = d;
+	break;
+case GF_SG_VRML_MFSTRING:
+	if (((MFString *)ptr->field.far_ptr)->vals[ind]) {
+		gf_free(((MFString *)ptr->field.far_ptr)->vals[ind]);
+		((MFString *)ptr->field.far_ptr)->vals[ind] = NULL;
+	}
+	str = JSVAL_IS_STRING(*vp) ? JSVAL_TO_STRING(*vp) : JS_ValueToString(c, *vp);
+	str_val = SMJS_CHARS_FROM_STRING(c, str);
+	((MFString *)ptr->field.far_ptr)->vals[ind] = gf_strdup(str_val);
+	SMJS_FREE(c, str_val);
+	break;
+
+case GF_SG_VRML_MFURL:
+	if (((MFURL *)ptr->field.far_ptr)->vals[ind].url) {
+		gf_free(((MFURL *)ptr->field.far_ptr)->vals[ind].url);
+		((MFURL *)ptr->field.far_ptr)->vals[ind].url = NULL;
+	}
+	str = JSVAL_IS_STRING(*vp) ? JSVAL_TO_STRING(*vp) : JS_ValueToString(c, *vp);
+	str_val = SMJS_CHARS_FROM_STRING(c, str);
+	((MFURL *)ptr->field.far_ptr)->vals[ind].url = gf_strdup(str_val);
+	((MFURL *)ptr->field.far_ptr)->vals[ind].OD_ID = 0;
+	SMJS_FREE(c, str_val);
+	break;
+
+case GF_SG_VRML_MFVEC2F:
+	from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
+	gf_sg_vrml_field_copy(& ((MFVec2f *)ptr->field.far_ptr)->vals[ind], from->field.far_ptr, from->field.fieldType);
+	break;
+case GF_SG_VRML_MFVEC3F:
+	from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
+	gf_sg_vrml_field_copy(& ((MFVec3f *)ptr->field.far_ptr)->vals[ind], from->field.far_ptr, from->field.fieldType);
+	break;
+case GF_SG_VRML_MFROTATION:
+	from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
+	gf_sg_vrml_field_copy(& ((MFRotation *)ptr->field.far_ptr)->vals[ind], from->field.far_ptr, from->field.fieldType);
+	break;
+case GF_SG_VRML_MFCOLOR:
+	from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(*vp));
+	gf_sg_vrml_field_copy(& ((MFColor *)ptr->field.far_ptr)->vals[ind], from->field.far_ptr, from->field.fieldType);
+	break;
+}
+
+Script_FieldChanged(c, NULL, ptr, NULL);
+return JS_TRUE;
+}
+
 static SMJS_FUNC_PROP_SET( array_setLength)
 
-	u32 len, i, sftype;
-	JSBool ret;
-	JSClass *the_sf_class;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	if (!JSVAL_IS_INT(*vp) || JSVAL_TO_INT(*vp) < 0) return JS_FALSE;
-	/*avoids gcc warning*/
-	if (!id) id=0;
-	len = JSVAL_TO_INT(*vp);
-
-
-	if (!len) {
-		if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
-			gf_node_unregister_children(ptr->owner, *(GF_ChildNodeItem**)ptr->field.far_ptr);
-			*(GF_ChildNodeItem**)ptr->field.far_ptr = NULL;
-		} else {
-			gf_sg_vrml_mf_reset(ptr->field.far_ptr, ptr->field.fieldType);
-		}
-		JS_SetArrayLength(c, ptr->js_list, 0);
-		Script_FieldChanged(c, NULL, ptr, NULL);
-		return JS_TRUE;
-	}
-
-	ret = JS_SetArrayLength(c, ptr->js_list, len);
-	if (ret==JS_FALSE) return ret;
-
-#if 0
-	/*insert till index if needed*/
-	if (ptr->field.fieldType != GF_SG_VRML_MFNODE) {
-		if (!ptr->field.far_ptr) ptr->field_ptr = ptr->field.far_ptr = gf_sg_vrml_field_pointer_new(ptr->field.fieldType);
-		gf_sg_vrml_mf_reset(ptr->field.far_ptr, ptr->field.fieldType);
-		gf_sg_vrml_mf_alloc(ptr->field.far_ptr, ptr->field.fieldType, len);
-		if (ptr->field_ptr) ptr->field_ptr = ptr->field.far_ptr;
-	}
+u32 len, i, sftype, old_len;
+JSBool ret;
+GF_JSClass *the_sf_class;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+if (!JSVAL_IS_INT(*vp) || JSVAL_TO_INT(*vp) < 0) return JS_FALSE;
+/*avoids gcc warning*/
+#ifndef GPAC_CONFIG_DARWIN
+if (!id) id=0;
 #endif
+len = JSVAL_TO_INT(*vp);
 
-	the_sf_class = NULL;
-	switch (ptr->field.fieldType) {
-	case GF_SG_VRML_MFVEC2F: the_sf_class = &js_rt->SFVec2fClass; break;
-	case GF_SG_VRML_MFVEC3F: the_sf_class = &js_rt->SFVec3fClass; break;
-	case GF_SG_VRML_MFCOLOR: the_sf_class = &js_rt->SFColorClass; break;
-	case GF_SG_VRML_MFROTATION: the_sf_class = &js_rt->SFRotationClass; break;
-	case GF_SG_VRML_MFNODE:
-	{
-		u32 c = gf_node_list_get_count(*(GF_ChildNodeItem**)ptr->field.far_ptr);
-		while (len < c) {
-			GF_Node *n = gf_node_list_del_child_idx((GF_ChildNodeItem**)ptr->field.far_ptr, c-1);
-			if (n) gf_node_unregister(n, ptr->owner);
-			c--;
-		}
-		if (len>c) {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[VRML] MFARRAY EXPANSION NOT SUPPORTED!!!\n"));
-		}
+
+if (!len) {
+	if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
+		gf_node_unregister_children(ptr->owner, *(GF_ChildNodeItem**)ptr->field.far_ptr);
+		*(GF_ChildNodeItem**)ptr->field.far_ptr = NULL;
+	} else {
+		gf_sg_vrml_mf_reset(ptr->field.far_ptr, ptr->field.fieldType);
 	}
-		return JS_TRUE;
-	}
-	sftype = gf_sg_vrml_get_sf_type(ptr->field.fieldType);
-	for (i=0; i<len; i++) {
-		jsval a_val;
-		if (the_sf_class) {
-			JSObject *an_obj = SMJS_CONSTRUCT_OBJECT(c, the_sf_class, obj);
-			a_val = OBJECT_TO_JSVAL(an_obj );
-		} else {
-			switch (sftype) {
-			case GF_SG_VRML_SFBOOL: a_val = BOOLEAN_TO_JSVAL(0); break;
-			case GF_SG_VRML_SFINT32: a_val = INT_TO_JSVAL(0); break;
-			case GF_SG_VRML_SFFLOAT:
-			case GF_SG_VRML_SFTIME:
-				a_val = JS_MAKE_DOUBLE(c, 0);
-				break;
-			case GF_SG_VRML_SFSTRING:
-			case GF_SG_VRML_SFURL:
-				a_val = STRING_TO_JSVAL( JS_NewStringCopyZ(c, "") );
-				break;
-			default: a_val = INT_TO_JSVAL(0); break;
-			}
-		}
-		JS_SetElement(c, ptr->js_list, i, &a_val);
-	}
+	JS_SetArrayLength(c, ptr->js_list, 0);
+	Script_FieldChanged(c, NULL, ptr, NULL);
 	return JS_TRUE;
+}
+
+ret = JS_GetArrayLength(c, ptr->js_list, &old_len);
+if (ret==JS_FALSE) return ret;
+
+ret = JS_SetArrayLength(c, ptr->js_list, len);
+if (ret==JS_FALSE) return ret;
+
+the_sf_class = NULL;
+switch (ptr->field.fieldType) {
+case GF_SG_VRML_MFVEC2F:
+	the_sf_class = &js_rt->SFVec2fClass;
+	break;
+case GF_SG_VRML_MFVEC3F:
+	the_sf_class = &js_rt->SFVec3fClass;
+	break;
+case GF_SG_VRML_MFCOLOR:
+	the_sf_class = &js_rt->SFColorClass;
+	break;
+case GF_SG_VRML_MFROTATION:
+	the_sf_class = &js_rt->SFRotationClass;
+	break;
+case GF_SG_VRML_MFNODE:
+{
+	u32 c = gf_node_list_get_count(*(GF_ChildNodeItem**)ptr->field.far_ptr);
+	while (len < c) {
+		GF_Node *n = gf_node_list_del_child_idx((GF_ChildNodeItem**)ptr->field.far_ptr, c-1);
+		if (n) gf_node_unregister(n, ptr->owner);
+		c--;
+	}
+	if (len>c) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_SCRIPT, ("[VRML] MFARRAY EXPANSION NOT SUPPORTED!!!\n"));
+	}
+}
+return JS_TRUE;
+}
+
+sftype = gf_sg_vrml_get_sf_type(ptr->field.fieldType);
+for (i=old_len; i<len; i++) {
+	jsval a_val;
+	if (the_sf_class) {
+		JSObject *an_obj = SMJS_CONSTRUCT_OBJECT(c, the_sf_class, obj);
+		a_val = OBJECT_TO_JSVAL(an_obj );
+	} else {
+		switch (sftype) {
+		case GF_SG_VRML_SFBOOL:
+			a_val = BOOLEAN_TO_JSVAL(0);
+			break;
+		case GF_SG_VRML_SFINT32:
+			a_val = INT_TO_JSVAL(0);
+			break;
+		case GF_SG_VRML_SFFLOAT:
+		case GF_SG_VRML_SFTIME:
+			a_val = JS_MAKE_DOUBLE(c, 0);
+			break;
+		case GF_SG_VRML_SFSTRING:
+		case GF_SG_VRML_SFURL:
+			a_val = STRING_TO_JSVAL( JS_NewStringCopyZ(c, "") );
+			break;
+		default:
+			a_val = INT_TO_JSVAL(0);
+			break;
+		}
+	}
+	JS_SetElement(c, ptr->js_list, i, &a_val);
+}
+return JS_TRUE;
 }
 
 static SMJS_FUNC_PROP_GET( array_getLength)
 
-	JSBool ret;
-	jsuint len;
-	GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
-	/*avoids gcc warning*/
-	if (!id) id=0;
-
-	if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
-		len = gf_node_list_get_count(*(GF_ChildNodeItem **)ptr->field.far_ptr);
-		ret = JS_TRUE;
-	} else {
-		ret = JS_GetArrayLength(c, ptr->js_list, &len);
-	}
-	*vp = INT_TO_JSVAL(len);
-	return ret;
+JSBool ret;
+jsuint len;
+GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
+/*avoids gcc warning*/
+#ifndef GPAC_CONFIG_DARWIN
+if (!id) id=0;
+#endif
+if (ptr->field.fieldType==GF_SG_VRML_MFNODE) {
+	len = gf_node_list_get_count(*(GF_ChildNodeItem **)ptr->field.far_ptr);
+	ret = JS_TRUE;
+} else {
+	ret = JS_GetArrayLength(c, ptr->js_list, &len);
+}
+*vp = INT_TO_JSVAL(len);
+return ret;
 }
 
 
@@ -2948,7 +3128,7 @@ static JSBool SMJS_FUNCTION(MFVec2fConstructor)
 	SMJS_SET_PRIVATE(c, obj, ptr);
 
 	for (i=0; i<argc; i++) {
-		if (!JSVAL_IS_OBJECT(argv[i]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[i]), &js_rt->SFVec2fClass, NULL) ) {
+		if (!JSVAL_IS_OBJECT(argv[i]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[i]), &js_rt->SFVec2fClass, NULL) ) {
 			item = SMJS_CONSTRUCT_OBJECT(c, &js_rt->SFVec2fClass, obj);
 			val = OBJECT_TO_JSVAL(item);
 			JS_SetElement(c, ptr->js_list, i, &val);
@@ -2968,8 +3148,8 @@ static JSBool SMJS_FUNCTION(MFVec3fConstructor)
 	u32 i;
 	SMJS_ARGS
 	GF_JSField *ptr;
-	SMJS_OBJ_CONSTRUCTOR(&js_rt->MFVec3fClass)	
-	
+	SMJS_OBJ_CONSTRUCTOR(&js_rt->MFVec3fClass)
+
 	ptr = NewJSField(c);
 	ptr->field.fieldType = GF_SG_VRML_MFVEC3F;
 	setup_js_array(c, obj, ptr, 0, 0);
@@ -2977,7 +3157,7 @@ static JSBool SMJS_FUNCTION(MFVec3fConstructor)
 	SMJS_SET_PRIVATE(c, obj, ptr);
 
 	for (i=0; i<argc; i++) {
-		if (!JSVAL_IS_OBJECT(argv[i]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[i]), &js_rt->SFVec3fClass, NULL) ) {
+		if (!JSVAL_IS_OBJECT(argv[i]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[i]), &js_rt->SFVec3fClass, NULL) ) {
 			item = SMJS_CONSTRUCT_OBJECT(c, &js_rt->SFVec3fClass, obj);
 			val = OBJECT_TO_JSVAL(item);
 			JS_SetElement(c, ptr->js_list, i, &val);
@@ -2997,8 +3177,8 @@ static JSBool SMJS_FUNCTION(MFRotationConstructor)
 	u32 i;
 	SMJS_ARGS
 	GF_JSField *ptr;
-	SMJS_OBJ_CONSTRUCTOR(&js_rt->MFRotationClass)	
-	
+	SMJS_OBJ_CONSTRUCTOR(&js_rt->MFRotationClass)
+
 	ptr = NewJSField(c);
 	ptr->field.fieldType = GF_SG_VRML_MFROTATION;
 	setup_js_array(c, obj, ptr, 0, 0);
@@ -3006,7 +3186,7 @@ static JSBool SMJS_FUNCTION(MFRotationConstructor)
 	SMJS_SET_PRIVATE(c, obj, ptr);
 
 	for (i=0; i<argc; i++) {
-		if (!JSVAL_IS_OBJECT(argv[i]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[i]), &js_rt->SFRotationClass, NULL) ) {
+		if (!JSVAL_IS_OBJECT(argv[i]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[i]), &js_rt->SFRotationClass, NULL) ) {
 			item = SMJS_CONSTRUCT_OBJECT(c, &js_rt->SFVec3fClass, obj);
 			val = OBJECT_TO_JSVAL(item);
 			JS_SetElement(c, ptr->js_list, i, &val);
@@ -3035,7 +3215,7 @@ static JSBool SMJS_FUNCTION(MFColorConstructor)
 	SMJS_SET_PRIVATE(c, obj, ptr);
 
 	for (i=0; i<argc; i++) {
-		if (!JSVAL_IS_OBJECT(argv[i]) || !JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[i]), &js_rt->SFColorClass, NULL) ) {
+		if (!JSVAL_IS_OBJECT(argv[i]) || !GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(argv[i]), &js_rt->SFColorClass, NULL) ) {
 			item = SMJS_CONSTRUCT_OBJECT(c, &js_rt->SFColorClass, obj);
 			val = OBJECT_TO_JSVAL(item);
 			JS_SetElement(c, ptr->js_list, i, &val);
@@ -3058,7 +3238,7 @@ JSBool SMJS_FUNCTION(vrml_event_add_listener)
 	GF_Node *node;
 	GF_JSField *ptr;
 	SMJS_OBJ
-	if (! JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+	if (! GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
 	ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 	assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
 	node = * ((GF_Node **)ptr->field.far_ptr);
@@ -3070,7 +3250,7 @@ JSBool SMJS_FUNCTION(vrml_event_remove_listener)
 	GF_Node *node;
 	GF_JSField *ptr;
 	SMJS_OBJ
-	if (! JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
+	if (! GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) return JS_FALSE;
 	ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 	assert(ptr->field.fieldType==GF_SG_VRML_SFNODE);
 	node = * ((GF_Node **)ptr->field.far_ptr);
@@ -3088,81 +3268,81 @@ static JSBool SMJS_FUNCTION(vrml_dom3_not_implemented)
 void gf_sg_script_init_sm_api(GF_ScriptPriv *sc, GF_Node *script)
 {
 	JS_SETUP_CLASS(js_rt->globalClass, "global", JSCLASS_HAS_PRIVATE,
-		JS_PropertyStub, JS_PropertyStub_forSetter, JS_FinalizeStub);
+	               JS_PropertyStub, JS_PropertyStub_forSetter, JS_FinalizeStub);
 
 
 	JS_SETUP_CLASS(js_rt->AnyClass, "AnyClass", JSCLASS_HAS_PRIVATE,
-	  JS_PropertyStub, JS_PropertyStub_forSetter, JS_FinalizeStub);
+	               JS_PropertyStub, JS_PropertyStub_forSetter, JS_FinalizeStub);
 
 	JS_SETUP_CLASS(js_rt->browserClass , "Browser", 0,
-		JS_PropertyStub, JS_PropertyStub_forSetter, JS_FinalizeStub);
+	               JS_PropertyStub, JS_PropertyStub_forSetter, JS_FinalizeStub);
 
 #if 1
 	JS_SETUP_CLASS(js_rt->SFNodeClass, "SFNode", JSCLASS_HAS_PRIVATE,
-		node_getProperty, node_setProperty, node_finalize);
+	               node_getProperty, node_setProperty, node_finalize);
 #else
 	/*only used to debug JS_SETUP_CLASS at each of the numerous changes of JSAPI ............ */
 	memset(&js_rt->SFNodeClass, 0, sizeof(js_rt->SFNodeClass));
-	js_rt->SFNodeClass.name = "SFNode";
-	js_rt->SFNodeClass.flags = JSCLASS_HAS_PRIVATE;
-	js_rt->SFNodeClass.addProperty = JS_PropertyStub;
-	js_rt->SFNodeClass.delProperty = JS_PropertyStub;
-	js_rt->SFNodeClass.getProperty = node_getProperty;
-	js_rt->SFNodeClass.setProperty = node_setProperty;
-	js_rt->SFNodeClass.enumerate = JS_EnumerateStub;
-	js_rt->SFNodeClass.resolve = JS_ResolveStub;
-	js_rt->SFNodeClass.convert = JS_ConvertStub;
-	js_rt->SFNodeClass.finalize = node_finalize;
-	js_rt->SFNodeClass.hasInstance = gf_sg_js_has_instance;
+	js_rt->SFNodeClass._class.name = "SFNode";
+	js_rt->SFNodeClass._class.flags = JSCLASS_HAS_PRIVATE;
+	js_rt->SFNodeClass._class.addProperty = JS_PropertyStub;
+	js_rt->SFNodeClass._class.delProperty = JS_PropertyStub;
+	js_rt->SFNodeClass._class.getProperty = node_getProperty;
+	js_rt->SFNodeClass._class.setProperty = node_setProperty;
+	js_rt->SFNodeClass._class.enumerate = JS_EnumerateStub;
+	js_rt->SFNodeClass._class.resolve = JS_ResolveStub;
+	js_rt->SFNodeClass._class.convert = JS_ConvertStub;
+	js_rt->SFNodeClass._class.finalize = node_finalize;
+	js_rt->SFNodeClass._class.hasInstance = gf_sg_js_has_instance;
 #endif
 
 	JS_SETUP_CLASS(js_rt->SFVec2fClass , "SFVec2f", JSCLASS_HAS_PRIVATE,
-	  vec2f_getProperty, vec2f_setProperty, field_finalize);
+	               vec2f_getProperty, vec2f_setProperty, field_finalize);
 
 	JS_SETUP_CLASS(js_rt->SFVec3fClass , "SFVec3f", JSCLASS_HAS_PRIVATE,
-	  vec3f_getProperty, vec3f_setProperty, field_finalize);
+	               vec3f_getProperty, vec3f_setProperty, field_finalize);
 
 	JS_SETUP_CLASS(js_rt->SFRotationClass , "SFRotation", JSCLASS_HAS_PRIVATE,
-	  rot_getProperty, rot_setProperty,  field_finalize);
+	               rot_getProperty, rot_setProperty,  field_finalize);
 
 	JS_SETUP_CLASS(js_rt->SFColorClass , "SFColor", JSCLASS_HAS_PRIVATE,
-	  color_getProperty, color_setProperty, field_finalize);
+	               color_getProperty, color_setProperty, field_finalize);
 
 	JS_SETUP_CLASS(js_rt->SFImageClass , "SFImage", JSCLASS_HAS_PRIVATE,
-	  image_getProperty, image_setProperty, field_finalize);
+	               image_getProperty, image_setProperty, field_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFInt32Class , "MFInt32", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement, array_finalize);
+	               array_getElement,  array_setElement, array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFBoolClass , "MFBool", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement, array_finalize);
+	               array_getElement,  array_setElement, array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFTimeClass , "MFTime", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFFloatClass , "MFFloat", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFUrlClass , "MFUrl", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFStringClass , "MFString", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFNodeClass , "MFNode", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFVec2fClass , "MFVec2f", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFVec3fClass , "MFVec3f", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFRotationClass , "MFRotation", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SETUP_CLASS(js_rt->MFColorClass , "MFColor", JSCLASS_HAS_PRIVATE,
-	  array_getElement,  array_setElement,  array_finalize);
+	               array_getElement,  array_setElement,  array_finalize);
 
 	JS_SetErrorReporter(sc->js_ctx, script_error);
 
@@ -3187,29 +3367,27 @@ void gf_sg_script_init_sm_api(GF_ScriptPriv *sc, GF_Node *script)
 	JS_DefineProperty(sc->js_ctx, sc->js_obj, "NULL", JSVAL_NULL, 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
 	JS_DefineProperty(sc->js_ctx, sc->js_obj, "_this", PRIVATE_TO_JSVAL(script), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
 
-	sc->js_browser = JS_DefineObject(sc->js_ctx, sc->js_obj, "Browser", &js_rt->browserClass, 0, 0 );
+	sc->js_browser = JS_DefineObject(sc->js_ctx, sc->js_obj, "Browser", &js_rt->browserClass._class, 0, 0 );
 	JS_DefineProperty(sc->js_ctx, sc->js_browser, "_this", PRIVATE_TO_JSVAL(script), 0, 0, JSPROP_READONLY | JSPROP_PERMANENT );
 	{
 		JSFunctionSpec browserFunctions[] = {
-		  SMJS_FUNCTION_SPEC("getName", getName, 0),
-		  SMJS_FUNCTION_SPEC("getVersion", getVersion, 0),
-		  SMJS_FUNCTION_SPEC("getCurrentSpeed", getCurrentSpeed, 0),
-		  SMJS_FUNCTION_SPEC("getCurrentFrameRate", getCurrentFrameRate, 0),
-		  SMJS_FUNCTION_SPEC("getWorldURL", getWorldURL, 0),
-		  SMJS_FUNCTION_SPEC("replaceWorld", replaceWorld, 1),
-		  SMJS_FUNCTION_SPEC("addRoute", addRoute, 4),
-		  SMJS_FUNCTION_SPEC("deleteRoute", deleteRoute, 4),
-		  SMJS_FUNCTION_SPEC("loadURL", loadURL, 1),
-		  SMJS_FUNCTION_SPEC("createVrmlFromString", createVrmlFromString, 1),
-		  SMJS_FUNCTION_SPEC("setDescription", setDescription, 1),
-		  SMJS_FUNCTION_SPEC("print",           JSPrint,          1),
-		  SMJS_FUNCTION_SPEC("getOption",  getOption,          2),
-		  SMJS_FUNCTION_SPEC("setOption",  setOption,          3),
-		  SMJS_FUNCTION_SPEC("getScript",  getScript,          0),
-		  SMJS_FUNCTION_SPEC("getProto",  getProto,          0),
-		  SMJS_FUNCTION_SPEC("loadScript",  loadScript,          1),
-		  SMJS_FUNCTION_SPEC("getElementById",  getElementById,   1),
-		  SMJS_FUNCTION_SPEC(0, 0, 0)
+			SMJS_FUNCTION_SPEC("getName", getName, 0),
+			SMJS_FUNCTION_SPEC("getVersion", getVersion, 0),
+			SMJS_FUNCTION_SPEC("getCurrentSpeed", getCurrentSpeed, 0),
+			SMJS_FUNCTION_SPEC("getCurrentFrameRate", getCurrentFrameRate, 0),
+			SMJS_FUNCTION_SPEC("getWorldURL", getWorldURL, 0),
+			SMJS_FUNCTION_SPEC("replaceWorld", replaceWorld, 1),
+			SMJS_FUNCTION_SPEC("addRoute", addRoute, 4),
+			SMJS_FUNCTION_SPEC("deleteRoute", deleteRoute, 4),
+			SMJS_FUNCTION_SPEC("loadURL", loadURL, 1),
+			SMJS_FUNCTION_SPEC("createVrmlFromString", createVrmlFromString, 1),
+			SMJS_FUNCTION_SPEC("setDescription", setDescription, 1),
+			SMJS_FUNCTION_SPEC("print",           JSPrint,          1),
+			SMJS_FUNCTION_SPEC("getScript",  getScript,          0),
+			SMJS_FUNCTION_SPEC("getProto",  getProto,          0),
+			SMJS_FUNCTION_SPEC("loadScript",  loadScript,          1),
+			SMJS_FUNCTION_SPEC("getElementById",  getElementById,   1),
+			SMJS_FUNCTION_SPEC(0, 0, 0)
 		};
 		JS_DefineFunctions(sc->js_ctx, sc->js_browser, browserFunctions);
 	}
@@ -3228,16 +3406,16 @@ void gf_sg_script_init_sm_api(GF_ScriptPriv *sc, GF_Node *script)
 			SMJS_FUNCTION_SPEC(0, 0, 0)
 		};
 		JSPropertySpec SFNodeProps[] = {
-			{"__dummy",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{0, 0, 0, 0, 0}
+			SMJS_PROPERTY_SPEC("__dummy",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC(0, 0, 0, 0, 0)
 		};
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFNodeClass, SFNodeConstructor, 1, SFNodeProps, SFNodeMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFNodeClass, SFNodeConstructor, 1, SFNodeProps, SFNodeMethods, 0, 0);
 	}
 	{
 		JSPropertySpec SFVec2fProps[] = {
-			{"x",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"y",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{0, 0, 0, 0, 0}
+			SMJS_PROPERTY_SPEC("x",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("y",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC(0, 0, 0, 0, 0)
 		};
 		JSFunctionSpec SFVec2fMethods[] = {
 			SMJS_FUNCTION_SPEC("add",			vec2f_add,      1),
@@ -3251,14 +3429,14 @@ void gf_sg_script_init_sm_api(GF_ScriptPriv *sc, GF_Node *script)
 			SMJS_FUNCTION_SPEC("toString",        field_toString, 0),
 			SMJS_FUNCTION_SPEC(0, 0, 0)
 		};
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFVec2fClass, SFVec2fConstructor, 0, SFVec2fProps, SFVec2fMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFVec2fClass, SFVec2fConstructor, 0, SFVec2fProps, SFVec2fMethods, 0, 0);
 	}
 	{
 		JSPropertySpec SFVec3fProps[] = {
-			{"x",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"y",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"z",       2,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{0, 0, 0, 0, 0}
+			SMJS_PROPERTY_SPEC("x",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("y",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("z",       2,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC(0, 0, 0, 0, 0)
 		};
 		JSFunctionSpec SFVec3fMethods[] = {
 			SMJS_FUNCTION_SPEC("add",             vec3f_add,      1),
@@ -3273,15 +3451,15 @@ void gf_sg_script_init_sm_api(GF_ScriptPriv *sc, GF_Node *script)
 			SMJS_FUNCTION_SPEC("toString",        field_toString,	0),
 			SMJS_FUNCTION_SPEC(0, 0, 0)
 		};
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFVec3fClass, SFVec3fConstructor, 0, SFVec3fProps, SFVec3fMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFVec3fClass, SFVec3fConstructor, 0, SFVec3fProps, SFVec3fMethods, 0, 0);
 	}
 	{
 		JSPropertySpec SFRotationProps[] = {
-			{"xAxis",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"yAxis",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"zAxis",       2,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"angle",   3,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{0, 0, 0, 0, 0}
+			SMJS_PROPERTY_SPEC("xAxis",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("yAxis",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("zAxis",       2,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("angle",   3,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC(0, 0, 0, 0, 0)
 		};
 		JSFunctionSpec SFRotationMethods[] = {
 			SMJS_FUNCTION_SPEC("getAxis",         rot_getAxis,      1),
@@ -3293,14 +3471,14 @@ void gf_sg_script_init_sm_api(GF_ScriptPriv *sc, GF_Node *script)
 			SMJS_FUNCTION_SPEC("toString",        field_toString,	0),
 			SMJS_FUNCTION_SPEC(0, 0, 0)
 		};
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFRotationClass, SFRotationConstructor, 0, SFRotationProps, SFRotationMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFRotationClass, SFRotationConstructor, 0, SFRotationProps, SFRotationMethods, 0, 0);
 	}
 	{
 		JSPropertySpec SFColorProps[] = {
-			{"r",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"g",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"b",       2,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{0, 0, 0, 0, 0}
+			SMJS_PROPERTY_SPEC("r",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("g",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("b",       2,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC(0, 0, 0, 0, 0)
 		};
 		JSFunctionSpec SFColorMethods[] = {
 			SMJS_FUNCTION_SPEC("setHSV",          color_setHSV,   3),
@@ -3308,54 +3486,54 @@ void gf_sg_script_init_sm_api(GF_ScriptPriv *sc, GF_Node *script)
 			SMJS_FUNCTION_SPEC("toString",        field_toString,       0),
 			SMJS_FUNCTION_SPEC(0, 0, 0)
 		};
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFColorClass, SFColorConstructor, 0, SFColorProps, SFColorMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFColorClass, SFColorConstructor, 0, SFColorProps, SFColorMethods, 0, 0);
 	}
 	{
 		JSPropertySpec SFImageProps[] = {
-			{"x",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"y",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"comp",    2,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{"array",   3,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0},
-			{0, 0, 0, 0, 0}
+			SMJS_PROPERTY_SPEC("x",       0,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("y",       1,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("comp",    2,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC("array",   3,       JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_SHARED, 0, 0),
+			SMJS_PROPERTY_SPEC(0, 0, 0, 0, 0)
 		};
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFImageClass, SFImageConstructor, 0, SFImageProps, 0, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->SFImageClass, SFImageConstructor, 0, SFImageProps, 0, 0, 0);
 	}
 
 	{
 		JSPropertySpec MFArrayProp[] = {
-			{ "length", 0, JSPROP_PERMANENT | JSPROP_SHARED, array_getLength, array_setLength },
-			{ "assign", 1, JSPROP_PERMANENT | JSPROP_SHARED, array_getElement, array_setElement},
-			{ 0, 0, 0, 0, 0 }
+			SMJS_PROPERTY_SPEC( "length", 0, JSPROP_PERMANENT | JSPROP_SHARED, array_getLength, array_setLength ),
+			SMJS_PROPERTY_SPEC( "assign", 1, JSPROP_PERMANENT | JSPROP_SHARED, array_getElement, array_setElement),
+			SMJS_PROPERTY_SPEC( 0, 0, 0, 0, 0 )
 		};
 		JSFunctionSpec MFArrayMethods[] = {
 			SMJS_FUNCTION_SPEC("toString",        field_toString,       0),
 			SMJS_FUNCTION_SPEC(0, 0, 0)
 		};
 
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFInt32Class, MFInt32Constructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFBoolClass, MFBoolConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFFloatClass, MFFloatConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFTimeClass, MFTimeConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFStringClass, MFStringConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFUrlClass, MFURLConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFVec2fClass, MFVec2fConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFVec3fClass, MFVec3fConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFRotationClass, MFRotationConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFColorClass, MFColorConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
-		JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFNodeClass, MFNodeConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFInt32Class, MFInt32Constructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFBoolClass, MFBoolConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFFloatClass, MFFloatConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFTimeClass, MFTimeConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFStringClass, MFStringConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFUrlClass, MFURLConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFVec2fClass, MFVec2fConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFVec3fClass, MFVec3fConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFRotationClass, MFRotationConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFColorClass, MFColorConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &js_rt->MFNodeClass, MFNodeConstructor, 0, MFArrayProp, MFArrayMethods, 0, 0);
 	}
 
-/*
-	cant get any doc specifying if these are supposed to be supported in MPEG4Script...
-	JS_InitClass(sc->js_ctx, sc->js_obj, 0, &SFVec4fClass, SFVec4fConstructor, 0, SFVec4fProps, SFVec4fMethods, 0, 0);
-	JS_InitClass(sc->js_ctx, sc->js_obj, 0, &MFVec4fClass, MFVec4fCons, 0, MFArrayProp, 0, 0, 0);
-*/
+	/*
+		cant get any doc specifying if these are supposed to be supported in MPEG4Script...
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &SFVec4fClass, SFVec4fConstructor, 0, SFVec4fProps, SFVec4fMethods, 0, 0);
+		GF_JS_InitClass(sc->js_ctx, sc->js_obj, 0, &MFVec4fClass, MFVec4fCons, 0, MFArrayProp, 0, 0, 0);
+	*/
 
 }
 
 
 
-void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF_Node *owner, GF_JSField *parent)
+JSBool gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF_Node *owner, GF_JSField *parent)
 {
 	jsdouble d;
 	Bool changed;
@@ -3365,8 +3543,8 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 	jsval item;
 	u32 i;
 
-	if (JSVAL_IS_VOID(val)) return;
-	if ((field->fieldType != GF_SG_VRML_SFNODE) && JSVAL_IS_NULL(val)) return;
+	if (JSVAL_IS_VOID(val)) return JS_TRUE;
+	if ((field->fieldType != GF_SG_VRML_SFNODE) && JSVAL_IS_NULL(val)) return JS_TRUE;
 
 
 	switch (field->fieldType) {
@@ -3376,7 +3554,7 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			*((SFBool *) field->far_ptr) = JSVAL_TO_BOOLEAN(val);
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_SFINT32:
 	{
@@ -3384,30 +3562,30 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			* ((SFInt32 *) field->far_ptr) = JSVAL_TO_INT(val);
 			Script_FieldChanged(c, owner, parent, field);
 		} else if (JSVAL_IS_NUMBER(val) ) {
-			JS_ValueToNumber(c, val, &d );
+			SMJS_GET_NUMBER(val, d );
 			*((SFInt32 *) field->far_ptr) = (s32) d;
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_SFFLOAT:
 	{
 		if (JSVAL_IS_NUMBER(val) ) {
-			JS_ValueToNumber(c, val, &d );
+			SMJS_GET_NUMBER(val, d );
 			*((SFFloat *) field->far_ptr) = FLT2FIX( d);
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
-    }
+		return JS_TRUE;
+	}
 	case GF_SG_VRML_SFTIME:
 	{
 		if (JSVAL_IS_NUMBER(val) ) {
-			JS_ValueToNumber(c, val, &d );
+			SMJS_GET_NUMBER(val, d );
 			*((SFTime *) field->far_ptr) = (Double) d;
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
-    }
+		return JS_TRUE;
+	}
 	case GF_SG_VRML_SFSTRING:
 	{
 		SFString *s = (SFString*)field->far_ptr;
@@ -3420,7 +3598,7 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			Script_FieldChanged(c, owner, parent, field);
 		}
 		SMJS_FREE(c, str_val);
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_SFURL:
 	{
@@ -3432,7 +3610,7 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 		((SFURL*)field->far_ptr)->OD_ID = 0;
 		Script_FieldChanged(c, owner, parent, field);
 		SMJS_FREE(c, str_val);
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_MFSTRING:
 		if (JSVAL_IS_STRING(val)) {
@@ -3444,7 +3622,7 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			((MFString*)field->far_ptr)->vals[0] = gf_strdup(str_val);
 			Script_FieldChanged(c, owner, parent, field);
 			SMJS_FREE(c, str_val);
-			return;
+			return JS_TRUE;
 		}
 	case GF_SG_VRML_MFURL:
 		if (JSVAL_IS_STRING(val)) {
@@ -3457,7 +3635,7 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			((MFURL*)field->far_ptr)->vals[0].OD_ID = 0;
 			Script_FieldChanged(c, owner, parent, field);
 			SMJS_FREE(c, str_val);
-			return;
+			return JS_TRUE;
 		}
 
 	default:
@@ -3465,45 +3643,45 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 	}
 
 	//from here we must have an object
-	if (! JSVAL_IS_OBJECT(val)) return;
+	if (! JSVAL_IS_OBJECT(val)) return JS_FALSE;
 	obj = JSVAL_TO_OBJECT(val) ;
 
 	switch (field->fieldType) {
 	case GF_SG_VRML_SFVEC2F:
 	{
-		if (JS_InstanceOf(c, obj, &js_rt->SFVec2fClass, NULL) ) {
+		if (GF_JS_InstanceOf(c, obj, &js_rt->SFVec2fClass, NULL) ) {
 			p = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 			gf_sg_vrml_field_copy(field->far_ptr, p->field.far_ptr, GF_SG_VRML_SFVEC2F);
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_SFVEC3F:
 	{
-		if (JS_InstanceOf(c, obj, &js_rt->SFVec3fClass, NULL) ) {
+		if (GF_JS_InstanceOf(c, obj, &js_rt->SFVec3fClass, NULL) ) {
 			p = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 			gf_sg_vrml_field_copy(field->far_ptr, p->field.far_ptr, GF_SG_VRML_SFVEC3F);
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_SFROTATION:
 	{
-		if ( JS_InstanceOf(c, obj, &js_rt->SFRotationClass, NULL) ) {
+		if ( GF_JS_InstanceOf(c, obj, &js_rt->SFRotationClass, NULL) ) {
 			p = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 			gf_sg_vrml_field_copy(field->far_ptr, p->field.far_ptr, GF_SG_VRML_SFROTATION);
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_SFCOLOR:
 	{
-		if (JS_InstanceOf(c, obj, &js_rt->SFColorClass, NULL) ) {
+		if (GF_JS_InstanceOf(c, obj, &js_rt->SFColorClass, NULL) ) {
 			p = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 			gf_sg_vrml_field_copy(field->far_ptr, p->field.far_ptr, GF_SG_VRML_SFCOLOR);
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_SFNODE:
 	{
@@ -3515,50 +3693,50 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 
 		if (JSVAL_IS_NULL(val)) {
 			Script_FieldChanged(c, owner, parent, field);
-		} else if (JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) {
+		} else if (GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) {
 			GF_Node *n = * (GF_Node**) ((GF_JSField *) SMJS_GET_PRIVATE(c, obj))->field.far_ptr;
 			* ((GF_Node **)field->far_ptr) = n;
 			gf_node_register(n, owner);
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
+		return JS_TRUE;
 	}
 	case GF_SG_VRML_SFIMAGE:
 	{
-		if ( JS_InstanceOf(c, obj, &js_rt->SFImageClass, NULL) ) {
+		if ( GF_JS_InstanceOf(c, obj, &js_rt->SFImageClass, NULL) ) {
 			p = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 			gf_sg_vrml_field_copy(field->far_ptr, p->field.far_ptr, GF_SG_VRML_SFIMAGE);
 			Script_FieldChanged(c, owner, parent, field);
 		}
-		return;
+		return JS_TRUE;
 	}
 	default:
 		break;
 	}
 
 	//from here we handle only MF fields
-	if ( !JS_InstanceOf(c, obj, &js_rt->MFBoolClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFInt32Class, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFFloatClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFTimeClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFStringClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFUrlClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFVec2fClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFVec3fClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFRotationClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFColorClass, NULL)
-		&& !JS_InstanceOf(c, obj, &js_rt->MFNodeClass, NULL)
-/*
-		&& !JS_InstanceOf(c, obj, &MFVec4fClass, NULL)
-*/
-		) return;
+	if ( !GF_JS_InstanceOf(c, obj, &js_rt->MFBoolClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFInt32Class, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFFloatClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFTimeClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFStringClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFUrlClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFVec2fClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFVec3fClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFRotationClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFColorClass, NULL)
+	        && !GF_JS_InstanceOf(c, obj, &js_rt->MFNodeClass, NULL)
+	        /*
+	        		&& !GF_JS_InstanceOf(c, obj, &MFVec4fClass, NULL)
+	        */
+	   ) return JS_TRUE;
 
 
 	p = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 	JS_GetArrayLength(c, p->js_list, &len);
 
 	/*special handling for MF node, reset list first*/
-	if (JS_InstanceOf(c, obj, &js_rt->MFNodeClass, NULL)) {
+	if (GF_JS_InstanceOf(c, obj, &js_rt->MFNodeClass, NULL)) {
 		GF_Node *child;
 		GF_ChildNodeItem *last = NULL;
 		gf_node_unregister_children(owner, * (GF_ChildNodeItem **) field->far_ptr);
@@ -3570,7 +3748,7 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			if (JSVAL_IS_NULL(item)) break;
 			if (!JSVAL_IS_OBJECT(item)) break;
 			node_obj = JSVAL_TO_OBJECT(item);
-			if ( !JS_InstanceOf(c, node_obj, &js_rt->SFNodeClass, NULL)) break;
+			if ( !GF_JS_InstanceOf(c, node_obj, &js_rt->SFNodeClass, NULL)) break;
 			from = (GF_JSField *) SMJS_GET_PRIVATE(c, node_obj);
 
 			child = * ((GF_Node**)from->field.far_ptr);
@@ -3581,7 +3759,7 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 		Script_FieldChanged(c, owner, parent, field);
 		/*and mark the field as changed*/
 		JSScript_NodeModified(owner->sgprivate->scenegraph, owner, field, NULL);
-		return;
+		return JS_TRUE;
 	}
 
 	/*again, check text changes*/
@@ -3609,13 +3787,13 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			break;
 		case GF_SG_VRML_MFFLOAT:
 			if (JSVAL_IS_NUMBER(item)) {
-				JS_ValueToNumber(c, item, &d);
+				SMJS_GET_NUMBER(item, d);
 				((MFFloat *)field->far_ptr)->vals[i] = FLT2FIX( d);
 			}
 			break;
 		case GF_SG_VRML_MFTIME:
 			if (JSVAL_IS_NUMBER(item)) {
-				JS_ValueToNumber(c, item, &d);
+				SMJS_GET_NUMBER(item, d);
 				((MFTime *)field->far_ptr)->vals[i] = d;
 			}
 			break;
@@ -3631,7 +3809,7 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			}
 			SMJS_FREE(c, str_val);
 		}
-			break;
+		break;
 		case GF_SG_VRML_MFURL:
 		{
 			char *str_val;
@@ -3643,38 +3821,39 @@ void gf_sg_script_to_node_field(JSContext *c, jsval val, GF_FieldInfo *field, GF
 			mfu->vals[i].OD_ID = 0;
 			SMJS_FREE(c, str_val);
 		}
-			break;
+		break;
 
 		case GF_SG_VRML_MFVEC2F:
-			if ( JSVAL_IS_OBJECT(item) && JS_InstanceOf(c, JSVAL_TO_OBJECT(item), &js_rt->SFVec2fClass, NULL) ) {
+			if ( JSVAL_IS_OBJECT(item) && GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(item), &js_rt->SFVec2fClass, NULL) ) {
 				from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(item));
 				gf_sg_vrml_field_copy(& ((MFVec2f*)field->far_ptr)->vals[i], from->field.far_ptr, GF_SG_VRML_SFVEC2F);
 			}
 			break;
 		case GF_SG_VRML_MFVEC3F:
-			if ( JSVAL_IS_OBJECT(item) && JS_InstanceOf(c, JSVAL_TO_OBJECT(item), &js_rt->SFVec3fClass, NULL) ) {
+			if ( JSVAL_IS_OBJECT(item) && GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(item), &js_rt->SFVec3fClass, NULL) ) {
 				from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(item));
 				gf_sg_vrml_field_copy(& ((MFVec3f*)field->far_ptr)->vals[i], from->field.far_ptr, GF_SG_VRML_SFVEC3F);
 			}
 			break;
 		case GF_SG_VRML_MFROTATION:
-			if ( JSVAL_IS_OBJECT(item) && JS_InstanceOf(c, JSVAL_TO_OBJECT(item), &js_rt->SFRotationClass, NULL) ) {
+			if ( JSVAL_IS_OBJECT(item) && GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(item), &js_rt->SFRotationClass, NULL) ) {
 				from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(item));
 				gf_sg_vrml_field_copy(& ((MFRotation*)field->far_ptr)->vals[i], from->field.far_ptr, GF_SG_VRML_SFROTATION);
 			}
 			break;
 		case GF_SG_VRML_MFCOLOR:
-			if ( JSVAL_IS_OBJECT(item) && JS_InstanceOf(c, JSVAL_TO_OBJECT(item), &js_rt->SFColorClass, NULL) ) {
+			if ( JSVAL_IS_OBJECT(item) && GF_JS_InstanceOf(c, JSVAL_TO_OBJECT(item), &js_rt->SFColorClass, NULL) ) {
 				from = (GF_JSField *) SMJS_GET_PRIVATE(c, JSVAL_TO_OBJECT(item));
 				gf_sg_vrml_field_copy(& ((MFColor*)field->far_ptr)->vals[i], from->field.far_ptr, GF_SG_VRML_SFCOLOR);
 			}
 			break;
 
 		default:
-			return;
+			return JS_TRUE;
 		}
 	}
 	if (changed) Script_FieldChanged(c, owner, parent, field);
+	return JS_TRUE;
 }
 
 
@@ -3697,7 +3876,7 @@ static void gf_sg_script_update_cached_object(GF_ScriptPriv *priv, JSObject *obj
 			JS_SetElement(priv->js_ctx, jsf->js_list, (jsint) i, &newVal);
 		}
 	}
-		break;
+	break;
 	case GF_SG_VRML_MFINT32:
 	{
 		MFInt32 *f = (MFInt32 *) field->far_ptr;
@@ -3708,7 +3887,7 @@ static void gf_sg_script_update_cached_object(GF_ScriptPriv *priv, JSObject *obj
 			JS_SetElement(priv->js_ctx, jsf->js_list, (jsint) i, &newVal);
 		}
 	}
-		break;
+	break;
 	case GF_SG_VRML_MFFLOAT:
 	{
 		MFFloat *f = (MFFloat *) field->far_ptr;
@@ -3719,7 +3898,7 @@ static void gf_sg_script_update_cached_object(GF_ScriptPriv *priv, JSObject *obj
 			JS_SetElement(priv->js_ctx, jsf->js_list, (jsint) i, &newVal);
 		}
 	}
-		break;
+	break;
 	case GF_SG_VRML_MFTIME:
 	{
 		MFTime *f = (MFTime *) field->far_ptr;
@@ -3730,7 +3909,7 @@ static void gf_sg_script_update_cached_object(GF_ScriptPriv *priv, JSObject *obj
 			JS_SetElement(priv->js_ctx, jsf->js_list, (jsint) i, &newVal);
 		}
 	}
-		break;
+	break;
 	case GF_SG_VRML_MFSTRING:
 	{
 		MFString *f = (MFString *) field->far_ptr;
@@ -3742,7 +3921,7 @@ static void gf_sg_script_update_cached_object(GF_ScriptPriv *priv, JSObject *obj
 			JS_SetElement(priv->js_ctx, jsf->js_list, (jsint) i, &newVal);
 		}
 	}
-		break;
+	break;
 	case GF_SG_VRML_MFURL:
 	{
 		MFURL *f = (MFURL *) field->far_ptr;
@@ -3760,61 +3939,61 @@ static void gf_sg_script_update_cached_object(GF_ScriptPriv *priv, JSObject *obj
 			JS_SetElement(priv->js_ctx, jsf->js_list, (jsint) i, &newVal);
 		}
 	}
-		break;
+	break;
 	/*
 		MFNode is tricky because in VRML/MPEG-4, SFNode are assigned by referenced, not copy.
 		We therefore need to make sure we reuse existing SFNode object rather than
 		blindly recreating them
 	*/
 	case GF_SG_VRML_MFNODE:
-		{
+	{
 #if 0
-			GF_ChildNodeItem *f = *(GF_ChildNodeItem **) field->far_ptr;
-			u32 j;
-			jsuint count;
-			GF_List *temp_objs = gf_list_new();
+		GF_ChildNodeItem *f = *(GF_ChildNodeItem **) field->far_ptr;
+		u32 j;
+		jsuint count;
+		GF_List *temp_objs = gf_list_new();
 
-			/*1: find all existing objs for each node*/
-			JS_GetArrayLength(priv->js_ctx, jsf->js_list, &count);
+		/*1: find all existing objs for each node*/
+		JS_GetArrayLength(priv->js_ctx, jsf->js_list, &count);
 
-			/*this may introduce bugs when a child is being replaced through an update command, but it is way 
-			too costly to handle in script*/
-			if (gf_node_list_get_count(f)==count) return;
+		/*this may introduce bugs when a child is being replaced through an update command, but it is way
+		too costly to handle in script*/
+		if (gf_node_list_get_count(f)==count) return;
 
-			fprintf(stderr, "rewriting MFNode cache\n");
-			while (f) {
-				slot = NULL;
-				/*first look in the original array*/
-				for (j=0; j<count; j++) {
-					JSObject *an_obj;
-					JS_GetElement(priv->js_ctx, jsf->js_list, (jsint) j, &newVal);
-					an_obj = JSVAL_TO_OBJECT(newVal);
-					if (an_obj) slot = SMJS_GET_PRIVATE(priv->js_ctx, an_obj);
-					if (slot && (slot->node==f->node)) {
-						gf_list_add(temp_objs, an_obj);
-						break;
-					}
-					slot = NULL;
-				}
-				if (!slot) {
-					JSObject *an_obj = node_get_binding(priv, f->node, 0);
-					gf_list_add(temp_objs, an_obj);
-				}
-				f = f->next;
-			}
-			/*2- and rewrite the final array*/
-			count = gf_list_count(temp_objs);
-			if (JS_SetArrayLength(priv->js_ctx, jsf->js_list, count) != JS_TRUE) return;
+		fprintf(stderr, "rewriting MFNode cache\n");
+		while (f) {
+			slot = NULL;
+			/*first look in the original array*/
 			for (j=0; j<count; j++) {
-				JSObject *an_obj = gf_list_get(temp_objs, j);
-				slot = SMJS_GET_PRIVATE(priv->js_ctx, an_obj);
-				newVal = OBJECT_TO_JSVAL(an_obj);
-				JS_SetElement(priv->js_ctx, jsf->js_list, (jsint) j, &newVal);
+				JSObject *an_obj;
+				JS_GetElement(priv->js_ctx, jsf->js_list, (jsint) j, &newVal);
+				an_obj = JSVAL_TO_OBJECT(newVal);
+				if (an_obj) slot = SMJS_GET_PRIVATE(priv->js_ctx, an_obj);
+				if (slot && (slot->node==f->node)) {
+					gf_list_add(temp_objs, an_obj);
+					break;
+				}
+				slot = NULL;
 			}
-			gf_list_del(temp_objs);
-#endif
+			if (!slot) {
+				JSObject *an_obj = node_get_binding(priv, f->node, 0);
+				gf_list_add(temp_objs, an_obj);
+			}
+			f = f->next;
 		}
-		break;
+		/*2- and rewrite the final array*/
+		count = gf_list_count(temp_objs);
+		if (JS_SetArrayLength(priv->js_ctx, jsf->js_list, count) != JS_TRUE) return;
+		for (j=0; j<count; j++) {
+			JSObject *an_obj = gf_list_get(temp_objs, j);
+			slot = SMJS_GET_PRIVATE(priv->js_ctx, an_obj);
+			newVal = OBJECT_TO_JSVAL(an_obj);
+			JS_SetElement(priv->js_ctx, jsf->js_list, (jsint) j, &newVal);
+		}
+		gf_list_del(temp_objs);
+#endif
+	}
+	break;
 	}
 	jsf->field.NDTtype = 0;
 }
@@ -3825,13 +4004,13 @@ static void gf_sg_script_update_cached_object(GF_ScriptPriv *priv, JSObject *obj
 		jsf = NewJSField(priv->js_ctx);	\
 		jsf->owner = parent;	\
 		if(parent) gf_node_get_field(parent, field->fieldIndex, &jsf->field);	\
-
+ 
 #define SETUP_MF_FIELD	\
 		if (!obj) return JSVAL_NULL; \
 		jsf = (GF_JSField *) SMJS_GET_PRIVATE(priv->js_ctx, obj);	\
 		jsf->owner = parent;		\
 		if (parent) gf_node_get_field(parent, field->fieldIndex, &jsf->field);	\
-
+ 
 
 
 jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_Node *parent, Bool force_evaluate)
@@ -3845,21 +4024,21 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 
 	/*native types*/
 	switch (field->fieldType) {
-    case GF_SG_VRML_SFBOOL:
+	case GF_SG_VRML_SFBOOL:
 		return BOOLEAN_TO_JSVAL( * ((SFBool *) field->far_ptr) );
 	case GF_SG_VRML_SFINT32:
 		return INT_TO_JSVAL(  * ((SFInt32 *) field->far_ptr));
-    case GF_SG_VRML_SFFLOAT:
+	case GF_SG_VRML_SFFLOAT:
 		return JS_MAKE_DOUBLE(priv->js_ctx, FIX2FLT(* ((SFFloat *) field->far_ptr) ));
 	case GF_SG_VRML_SFTIME:
 		return JS_MAKE_DOUBLE(priv->js_ctx, * ((SFTime *) field->far_ptr));
 	case GF_SG_VRML_SFSTRING:
-    {
+	{
 		s = JS_NewStringCopyZ(priv->js_ctx, ((SFString *) field->far_ptr)->buffer);
 		return STRING_TO_JSVAL( s );
-    }
+	}
 	case GF_SG_VRML_SFURL:
-    {
+	{
 		SFURL *url = (SFURL *)field->far_ptr;
 		if (url->OD_ID > 0) {
 			char msg[30];
@@ -3869,60 +4048,75 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 			s = JS_NewStringCopyZ(priv->js_ctx, (const char *) url->url);
 		}
 		return STRING_TO_JSVAL( s );
-    }
+	}
 	}
 
+	obj =  NULL;
 
-#if 1
 	/*look into object bank in case we already have this object*/
 	if (parent && parent->sgprivate->interact && parent->sgprivate->interact->js_binding) {
 		i=0;
 		while ((jsf = gf_list_enum(parent->sgprivate->interact->js_binding->fields, &i))) {
 			obj = jsf->obj;
 			if (
-				/*make sure we use the same JS context*/
-				(jsf->js_ctx == priv->js_ctx)
-				&& (jsf->owner == parent)
-#if 0
-				&& (jsf->field.fieldIndex == field->fieldIndex)
-				/*type check needed for MFNode entries*/
-				&& (jsf->field.fieldType==field->fieldType)
-#else
-				&& (jsf->field.far_ptr==field->far_ptr)
-#endif
-				) {
+			    /*make sure we use the same JS context*/
+			    (jsf->js_ctx == priv->js_ctx)
+			    && (jsf->owner == parent)
+			    && (jsf->field.far_ptr==field->far_ptr)
+			) {
+				Bool do_rebuild = 0;
 				GF_LOG(GF_LOG_DEBUG, GF_LOG_SCRIPT, ("[VRML JS] found cached jsobj %p (field %s) in script %s bank (%d entries)\n", obj, field->name, gf_node_get_log_name((GF_Node*)JS_GetScript(priv->js_ctx)), gf_list_count(priv->js_cache) ) );
 				if (!force_evaluate && !jsf->field.NDTtype) return OBJECT_TO_JSVAL(obj);
+
+				switch (field->fieldType) {
+				//we need to rewrite these
+				case GF_SG_VRML_MFVEC2F:
+				case GF_SG_VRML_MFVEC3F:
+				case GF_SG_VRML_MFROTATION:
+				case GF_SG_VRML_MFCOLOR:
+					if (force_evaluate) {
+						do_rebuild = 1;
+						break;
+					}
+				default:
+					break;
+				}
+				if (do_rebuild) {
+					JS_SetArrayLength(priv->js_ctx, jsf->js_list, 0);
+					break;
+				}
 
 				gf_sg_script_update_cached_object(priv, obj, jsf, field, parent);
 				return OBJECT_TO_JSVAL(obj);
 			}
+			obj = NULL;
 		}
 	}
-#endif
 
-	GF_LOG(GF_LOG_DEBUG, GF_LOG_SCRIPT, ("[VRML JS] creating jsobj %s.%s\n", gf_node_get_name(parent), field->name) );
+	if (!obj) {
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_SCRIPT, ("[VRML JS] creating jsobj %s.%s\n", gf_node_get_name(parent), field->name) );
+	}
 
 	switch (field->fieldType) {
-    case GF_SG_VRML_SFVEC2F:
+	case GF_SG_VRML_SFVEC2F:
 		SETUP_FIELD
-		obj = JS_NewObject(priv->js_ctx, &js_rt->SFVec2fClass, 0, priv->js_obj);
+		obj = JS_NewObject(priv->js_ctx, &js_rt->SFVec2fClass._class, 0, priv->js_obj);
 		break;
-    case GF_SG_VRML_SFVEC3F:
+	case GF_SG_VRML_SFVEC3F:
 		SETUP_FIELD
-		obj = JS_NewObject(priv->js_ctx, &js_rt->SFVec3fClass, 0, priv->js_obj);
+		obj = JS_NewObject(priv->js_ctx, &js_rt->SFVec3fClass._class, 0, priv->js_obj);
 		break;
-    case GF_SG_VRML_SFROTATION:
+	case GF_SG_VRML_SFROTATION:
 		SETUP_FIELD
-		obj = JS_NewObject(priv->js_ctx, &js_rt->SFRotationClass, 0, priv->js_obj);
+		obj = JS_NewObject(priv->js_ctx, &js_rt->SFRotationClass._class, 0, priv->js_obj);
 		break;
-    case GF_SG_VRML_SFCOLOR:
+	case GF_SG_VRML_SFCOLOR:
 		SETUP_FIELD
-		obj = JS_NewObject(priv->js_ctx, &js_rt->SFColorClass, 0, priv->js_obj);
+		obj = JS_NewObject(priv->js_ctx, &js_rt->SFColorClass._class, 0, priv->js_obj);
 		break;
-    case GF_SG_VRML_SFIMAGE:
+	case GF_SG_VRML_SFIMAGE:
 		SETUP_FIELD
-		obj = JS_NewObject(priv->js_ctx, &js_rt->SFImageClass, 0, priv->js_obj);
+		obj = JS_NewObject(priv->js_ctx, &js_rt->SFImageClass._class, 0, priv->js_obj);
 		break;
 	case GF_SG_VRML_SFNODE:
 		if (! *(GF_Node**) field->far_ptr)
@@ -4015,10 +4209,12 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 	case GF_SG_VRML_MFVEC2F:
 	{
 		MFVec2f *f = (MFVec2f *) field->far_ptr;
-		obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFVec2fClass, priv->js_obj);
-		SETUP_MF_FIELD
+		if (!obj) {
+			obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFVec2fClass, priv->js_obj);
+			SETUP_MF_FIELD
+		}
 		for (i=0; i<f->count; i++) {
-			JSObject *pf = JS_NewObject(priv->js_ctx, &js_rt->SFVec2fClass, 0, obj);
+			JSObject *pf = JS_NewObject(priv->js_ctx, &js_rt->SFVec2fClass._class, 0, obj);
 			newVal = OBJECT_TO_JSVAL(pf);
 			slot = SFVec2f_Create(priv->js_ctx, pf, f->vals[i].x, f->vals[i].y);
 			slot->owner = parent;
@@ -4029,10 +4225,12 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 	case GF_SG_VRML_MFVEC3F:
 	{
 		MFVec3f *f = (MFVec3f *) field->far_ptr;
-		obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFVec3fClass, priv->js_obj);
-		SETUP_MF_FIELD
+		if (!obj) {
+			obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFVec3fClass, priv->js_obj);
+			SETUP_MF_FIELD
+		}
 		for (i=0; i<f->count; i++) {
-			JSObject *pf = JS_NewObject(priv->js_ctx, &js_rt->SFVec3fClass, 0, obj);
+			JSObject *pf = JS_NewObject(priv->js_ctx, &js_rt->SFVec3fClass._class, 0, obj);
 			newVal = OBJECT_TO_JSVAL(pf);
 			slot = SFVec3f_Create(priv->js_ctx, pf, f->vals[i].x, f->vals[i].y, f->vals[i].z);
 			slot->owner = parent;
@@ -4043,10 +4241,12 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 	case GF_SG_VRML_MFROTATION:
 	{
 		MFRotation *f = (MFRotation*) field->far_ptr;
-		obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFRotationClass, priv->js_obj);
-		SETUP_MF_FIELD
+		if (!obj) {
+			obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFRotationClass, priv->js_obj);
+			SETUP_MF_FIELD
+		}
 		for (i=0; i<f->count; i++) {
-			JSObject *pf = JS_NewObject(priv->js_ctx, &js_rt->SFRotationClass, 0, obj);
+			JSObject *pf = JS_NewObject(priv->js_ctx, &js_rt->SFRotationClass._class, 0, obj);
 			newVal = OBJECT_TO_JSVAL(pf);
 			slot = SFRotation_Create(priv->js_ctx, pf, f->vals[i].x, f->vals[i].y, f->vals[i].z, f->vals[i].q);
 			slot->owner = parent;
@@ -4057,10 +4257,12 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 	case GF_SG_VRML_MFCOLOR:
 	{
 		MFColor *f = (MFColor *) field->far_ptr;
-		obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFColorClass, priv->js_obj);
-		SETUP_MF_FIELD
+		if (!obj) {
+			obj = SMJS_CONSTRUCT_OBJECT(priv->js_ctx, &js_rt->MFColorClass, priv->js_obj);
+			SETUP_MF_FIELD
+		}
 		for (i=0; i<f->count; i++) {
-			JSObject *pf = JS_NewObject(priv->js_ctx, &js_rt->SFColorClass, 0, obj);
+			JSObject *pf = JS_NewObject(priv->js_ctx, &js_rt->SFColorClass._class, 0, obj);
 			newVal = OBJECT_TO_JSVAL(pf);
 			slot = SFColor_Create(priv->js_ctx, pf, f->vals[i].red, f->vals[i].green, f->vals[i].blue);
 			slot->owner = parent;
@@ -4096,7 +4298,7 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 			if (n->sgprivate->tag == TAG_ProtoNode) {
 				GF_ProtoInstance *proto_inst = (GF_ProtoInstance *) n;
 				if (!proto_inst->RenderingNode && !(proto_inst->flags&GF_SG_PROTO_LOADED) )
-					gf_sg_proto_instanciate(proto_inst);
+					gf_sg_proto_instantiate(proto_inst);
 			}
 
 			slot = SMJS_GET_PRIVATE(priv->js_ctx, pf);
@@ -4112,9 +4314,9 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 	}
 
 	//not supported
-    default:
+	default:
 		return JSVAL_NULL;
-    }
+	}
 
 	if (!obj) return JSVAL_NULL;
 	//store field associated with object if needed
@@ -4125,8 +4327,16 @@ jsval gf_sg_script_to_smjs_field(GF_ScriptPriv *priv, GF_FieldInfo *field, GF_No
 
 			/*remember the object*/
 			if (!parent->sgprivate->interact) GF_SAFEALLOC(parent->sgprivate->interact, struct _node_interactive_ext);
+			if (!parent->sgprivate->interact) {
+				GF_LOG(GF_LOG_ERROR, GF_LOG_SCENE, ("[VRMLJS] Failed to create interact storage\n"));
+				return JSVAL_NULL;
+			}
 			if (!parent->sgprivate->interact->js_binding) {
 				GF_SAFEALLOC(parent->sgprivate->interact->js_binding, struct _node_js_binding);
+				if (!parent->sgprivate->interact->js_binding) {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_SCENE, ("[VRMLJS] Failed to create JS bindings storage\n"));
+					return JSVAL_NULL;
+				}
 				parent->sgprivate->interact->js_binding->fields = gf_list_new();
 			}
 
@@ -4215,7 +4425,7 @@ static void JS_PreDestroy(GF_Node *node)
 
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_SCRIPT, ("[Script] Destroying script node %s", gf_node_get_log_name(node) ));
 
-	/*"shutdown" is no longer supported, as it is typically called when one of a parent node is destroyed through 
+	/*"shutdown" is no longer supported, as it is typically called when one of a parent node is destroyed through
 	a GC call. Calling JS_LookupProperty or JS_CallFunctionValue when GC is running will crash SpiderMonkey*/
 #if 0
 	if (JS_LookupProperty(priv->js_ctx, priv->js_obj, "shutdown", &fval))
@@ -4224,8 +4434,8 @@ static void JS_PreDestroy(GF_Node *node)
 #endif
 
 	gf_sg_lock_javascript(priv->js_ctx, 1);
-	
-	if (priv->event) gf_js_remove_root(priv->js_ctx, &priv->event, GF_JSGC_OBJECT);
+
+	if (priv->the_event) gf_js_remove_root(priv->js_ctx, &priv->the_event, GF_JSGC_OBJECT);
 
 	/*unprotect all cached objects from GC*/
 	JS_ReleaseRootObjects(priv);
@@ -4233,7 +4443,7 @@ static void JS_PreDestroy(GF_Node *node)
 	gf_sg_load_script_extensions(node->sgprivate->scenegraph, priv->js_ctx, priv->js_obj, 1);
 
 #ifndef GPAC_DISABLE_SVG
-	dom_js_pre_destroy(priv->js_ctx, node->sgprivate->scenegraph, NULL);
+	gf_sg_js_dom_pre_destroy(priv->js_ctx, node->sgprivate->scenegraph, NULL);
 #endif
 
 	gf_sg_lock_javascript(priv->js_ctx, 0);
@@ -4260,13 +4470,13 @@ static void JS_InitScriptFields(GF_ScriptPriv *priv, GF_Node *sc)
 	GF_FieldInfo info;
 	jsval val;
 
-    i=0;
+	i=0;
 	while ((sf = gf_list_enum(priv->fields, &i))) {
 
 		switch (sf->eventType) {
 		case GF_SG_EVENT_IN:
 			gf_node_get_field(sc, sf->ALL_index, &info);
-			val = gf_sg_script_to_smjs_field(priv, &info, sc, 0);
+			/*val = */gf_sg_script_to_smjs_field(priv, &info, sc, 0);
 			break;
 		case GF_SG_EVENT_OUT:
 			gf_node_get_field(sc, sf->ALL_index, &info);
@@ -4280,9 +4490,10 @@ static void JS_InitScriptFields(GF_ScriptPriv *priv, GF_Node *sc)
 			JS_DefineProperty(priv->js_ctx, priv->js_obj, (const char *) sf->name, val, 0, 0, JSPROP_PERMANENT);
 			break;
 		}
-    }
+	}
 }
 
+GF_EXPORT
 void gf_js_vrml_flush_event_out(GF_Node *node, GF_ScriptPriv *priv)
 {
 	u32 i;
@@ -4314,6 +4525,8 @@ static void JS_EventIn(GF_Node *node, GF_FieldInfo *in_field)
 	GF_FieldInfo t_info;
 	GF_ScriptPriv *priv;
 	u32 i;
+	uintN attr;
+	JSBool found;
 	priv = node->sgprivate->UserPrivate;
 
 	/*no support for change of static fields*/
@@ -4331,7 +4544,8 @@ static void JS_EventIn(GF_Node *node, GF_FieldInfo *in_field)
 	gf_sg_lock_javascript(priv->js_ctx, 1);
 
 	//locate function
-	if (! JS_LookupProperty(priv->js_ctx, priv->js_obj, sf->name, &fval) || JSVAL_IS_VOID(fval)) {
+	if (!JS_LookupProperty(priv->js_ctx, priv->js_obj, sf->name, &fval) || JSVAL_IS_VOID(fval) ||
+	        !JS_GetPropertyAttributes(priv->js_ctx, priv->js_obj, sf->name, &attr, &found) || found != JS_TRUE ) {
 		gf_sg_lock_javascript(priv->js_ctx, 0);
 		return;
 	}
@@ -4365,48 +4579,50 @@ static void JS_EventIn(GF_Node *node, GF_FieldInfo *in_field)
 
 	gf_js_vrml_flush_event_out(node, priv);
 
-#ifdef FORCE_GC
-	MyJSGC(priv->js_ctx);
-#endif
+	do_js_gc(priv->js_ctx, node);
 }
 
 
-static Bool vrml_js_load_script(M_Script *script, char *file, Bool primary_script)
+static Bool vrml_js_load_script(M_Script *script, char *file, Bool primary_script, jsval *rval)
 {
 	FILE *jsf;
 	char *jsscript;
 	u64 fsize;
 	Bool success = 1;
 	JSBool ret;
-	jsval rval, fval;
+	jsval fval;
 	GF_ScriptPriv *priv = (GF_ScriptPriv *) script->sgprivate->UserPrivate;
+	uintN attr;
+	JSBool found;
 
-	jsf = gf_f64_open(file, "rb");
+	jsf = gf_fopen(file, "rb");
 	if (!jsf) return 0;
 
-	gf_f64_seek(jsf, 0, SEEK_END);
-	fsize = gf_f64_tell(jsf);
-	gf_f64_seek(jsf, 0, SEEK_SET);
+	gf_fseek(jsf, 0, SEEK_END);
+	fsize = gf_ftell(jsf);
+	gf_fseek(jsf, 0, SEEK_SET);
 	jsscript = gf_malloc(sizeof(char)*(size_t)(fsize+1));
 	fsize = fread(jsscript, sizeof(char), (size_t)fsize, jsf);
-	fclose(jsf);
+	gf_fclose(jsf);
 	jsscript[fsize] = 0;
 
-	ret = JS_EvaluateScript(priv->js_ctx, priv->js_obj, jsscript, sizeof(char)*(size_t)fsize, 0, 0, &rval);
+	*rval = JSVAL_NULL;
+	ret = JS_EvaluateScript(priv->js_ctx, priv->js_obj, jsscript, (u32) (sizeof(char)*fsize), file, 0, rval);
 	if (ret==JS_FALSE) success = 0;
 
-	if (success && primary_script && JS_LookupProperty(priv->js_ctx, priv->js_obj, "initialize", &fval)) {
-		if (! JSVAL_IS_VOID(fval)) {
-			JS_CallFunctionValue(priv->js_ctx, priv->js_obj, fval, 0, NULL, &rval);
-			gf_js_vrml_flush_event_out((GF_Node *)script, priv);
-		}
+	if (success && primary_script
+	        && JS_LookupProperty(priv->js_ctx, priv->js_obj, "initialize", &fval) && !JSVAL_IS_VOID(fval)
+	        && JS_GetPropertyAttributes(priv->js_ctx, priv->js_obj, "initialize", &attr, &found) && found == JS_TRUE) {
+
+		JS_CallFunctionValue(priv->js_ctx, priv->js_obj, fval, 0, NULL, rval);
+		gf_js_vrml_flush_event_out((GF_Node *)script, priv);
 	}
 	gf_free(jsscript);
 	return success;
 }
 
 /*fetches each listed URL and attempts to load the script - this is SYNCHRONOUS*/
-Bool JSScriptFromFile(GF_Node *node, const char *opt_file, Bool no_complain)
+Bool JSScriptFromFile(GF_Node *node, const char *opt_file, Bool no_complain, jsval *rval)
 {
 	GF_JSAPIParam par;
 	u32 i;
@@ -4414,10 +4630,10 @@ Bool JSScriptFromFile(GF_Node *node, const char *opt_file, Bool no_complain)
 	char *url;
 	GF_Err e;
 	const char *ext;
-
 	M_Script *script = (M_Script *)node;
 
 	e = GF_SCRIPT_ERROR;
+	*rval = JSVAL_NULL;
 
 	par.dnld_man = NULL;
 	ScriptAction(NULL, node->sgprivate->scenegraph, GF_JSAPI_OP_GET_DOWNLOAD_MANAGER, NULL, &par);
@@ -4446,7 +4662,7 @@ Bool JSScriptFromFile(GF_Node *node, const char *opt_file, Bool no_complain)
 		}
 
 		if (!strstr(url, "://") || !strnicmp(url, "file://", 7)) {
-			Bool res = vrml_js_load_script(script, url, opt_file ? 0 : 1);
+			Bool res = vrml_js_load_script(script, url, opt_file ? 0 : 1, rval);
 			gf_free(url);
 			if (res) return 1;
 			if (no_complain) return 0;
@@ -4456,7 +4672,7 @@ Bool JSScriptFromFile(GF_Node *node, const char *opt_file, Bool no_complain)
 				e = gf_dm_sess_process(sess);
 				if (e==GF_OK) {
 					const char *szCache = gf_dm_sess_get_cache_name(sess);
-					if (!vrml_js_load_script(script, (char *) szCache, opt_file ? 0 : 1))
+					if (!vrml_js_load_script(script, (char *) szCache, opt_file ? 0 : 1, rval))
 						e = GF_SCRIPT_ERROR;
 				}
 				gf_dm_sess_del(sess);
@@ -4482,6 +4698,8 @@ static void JSScript_LoadVRML(GF_Node *node)
 	jsval rval, fval;
 	M_Script *script = (M_Script *)node;
 	GF_ScriptPriv *priv = (GF_ScriptPriv *) node->sgprivate->UserPrivate;
+	uintN attr;
+	JSBool found;
 
 	if (!priv || priv->is_loaded) return;
 	if (!script->url.count) return;
@@ -4520,8 +4738,8 @@ static void JSScript_LoadVRML(GF_Node *node)
 	/*initialize DOM*/
 	dom_js_load(node->sgprivate->scenegraph, priv->js_ctx, priv->js_obj);
 	/*create event object, and remember it*/
-	priv->event = dom_js_define_event(priv->js_ctx, priv->js_obj);
-	gf_js_add_root(priv->js_ctx, &priv->event, GF_JSGC_OBJECT);
+	priv->the_event = dom_js_define_event(priv->js_ctx, priv->js_obj);
+	gf_js_add_root(priv->js_ctx, &priv->the_event, GF_JSGC_OBJECT);
 #endif
 
 	gf_sg_load_script_extensions(node->sgprivate->scenegraph, priv->js_ctx, priv->js_obj, 0);
@@ -4536,27 +4754,26 @@ static void JSScript_LoadVRML(GF_Node *node)
 	priv->JS_EventIn = JS_EventIn;
 
 	if (!local_script) {
-		JSScriptFromFile(node, NULL, 0);
+		JSScriptFromFile(node, NULL, 0, &rval);
 		gf_sg_lock_javascript(priv->js_ctx, 0);
 		return;
 	}
 
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_SCRIPT, ("[VRML JS] Evaluating script %s\n", str));
 
-	ret = JS_EvaluateScript(priv->js_ctx, priv->js_obj, str, strlen(str), 0, 0, &rval);
+	ret = JS_EvaluateScript(priv->js_ctx, priv->js_obj, str, (u32) strlen(str), 0, 0, &rval);
 	if (ret==JS_TRUE) {
 		/*call initialize if present*/
-		if (JS_LookupProperty(priv->js_ctx, priv->js_obj, "initialize", &fval) && !JSVAL_IS_VOID(fval))
-			JS_CallFunctionValue(priv->js_ctx, priv->js_obj, fval, 0, NULL, &rval);
+		if (JS_LookupProperty(priv->js_ctx, priv->js_obj, "initialize", &fval) && !JSVAL_IS_VOID(fval)
+		        && JS_GetPropertyAttributes(priv->js_ctx, priv->js_obj, "initialize", &attr, &found) && found == JS_TRUE)
 
+			JS_CallFunctionValue(priv->js_ctx, priv->js_obj, fval, 0, NULL, &rval);
 		gf_js_vrml_flush_event_out(node, priv);
 	}
 
 	gf_sg_lock_javascript(priv->js_ctx, 0);
 
-#ifdef FORCE_GC
-	MyJSGC(priv->js_ctx);
-#endif
+	do_js_gc(priv->js_ctx, node);
 }
 
 static void JSScript_Load(GF_Node *node)
@@ -4607,16 +4824,16 @@ static void JSScript_NodeModified(GF_SceneGraph *sg, GF_Node *node, GF_FieldInfo
 
 	if (!info) {
 		/*handle DOM case*/
-		if ((node->sgprivate->tag>=GF_NODE_FIRST_PARENT_NODE_TAG) 
-			&& node->sgprivate->interact 
-			&& node->sgprivate->interact->js_binding 
-			&& node->sgprivate->interact->js_binding->node)
+		if ((node->sgprivate->tag>=GF_NODE_FIRST_PARENT_NODE_TAG)
+		        && node->sgprivate->interact
+		        && node->sgprivate->interact->js_binding
+		        && node->sgprivate->interact->js_binding->node)
 		{
 
 			if (gf_list_del_item(sg->objects, node->sgprivate->interact->js_binding->node)>=0) {
 #ifndef GPAC_DISABLE_SVG
 				gf_js_remove_root(sg->svg_js->js_ctx, &(node->sgprivate->interact->js_binding->node), GF_JSGC_OBJECT);
-				if (sg->svg_js->in_script) 
+				if (sg->svg_js->in_script)
 					sg->svg_js->force_gc = 1;
 				else
 				{
@@ -4649,7 +4866,7 @@ static void JSScript_NodeModified(GF_SceneGraph *sg, GF_Node *node, GF_FieldInfo
 			return;
 		}
 #else
-		if (!node->sgprivate->parents && node->sgprivate->interact->js_binding->node) {
+		if (!node->sgprivate->parents && node->sgprivate->interact && node->sgprivate->interact->js_binding && node->sgprivate->interact->js_binding->node) {
 			GF_JSField *field = node->sgprivate->interact->js_binding->node;
 			if (field->is_rooted) {
 				gf_js_remove_root(field->js_ctx, &field->obj, GF_JSGC_OBJECT);
@@ -4662,7 +4879,7 @@ static void JSScript_NodeModified(GF_SceneGraph *sg, GF_Node *node, GF_FieldInfo
 		/*final destroy*/
 		if (!node->sgprivate->num_instances) {
 			i=0;
-			while ((jsf = gf_list_enum(node->sgprivate->interact->js_binding->fields, &i))) {
+			while (node->sgprivate->interact && node->sgprivate->interact->js_binding && (jsf = gf_list_enum(node->sgprivate->interact->js_binding->fields, &i))) {
 				jsf->owner = NULL;
 
 				if (jsf->js_list) {
@@ -4711,6 +4928,7 @@ static void JSScript_NodeModified(GF_SceneGraph *sg, GF_Node *node, GF_FieldInfo
 	}
 }
 
+GF_EXPORT
 void gf_sg_handle_dom_event_for_vrml(GF_Node *node, GF_DOM_Event *event, GF_Node *observer)
 {
 #ifndef GPAC_DISABLE_SVG
@@ -4729,12 +4947,14 @@ void gf_sg_handle_dom_event_for_vrml(GF_Node *node, GF_DOM_Event *event, GF_Node
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_INTERACT, ("[DOM Events] Executing script code from VRML handler\n"));
 
 	priv = JS_GetScriptStack(hdl->js_context);
-	prev_event = SMJS_GET_PRIVATE(priv->js_ctx, priv->event);
-	/*break loops*/
-	if (prev_event && (prev_event->type==event->type) && (prev_event->target==event->target))
-		return;
-
 	gf_sg_lock_javascript(priv->js_ctx, 1);
+
+	prev_event = SMJS_GET_PRIVATE(priv->js_ctx, priv->the_event);
+	/*break loops*/
+	if (prev_event && (prev_event->type==event->type) && (prev_event->target==event->target)) {
+		gf_sg_lock_javascript(priv->js_ctx, 0);
+		return;
+	}
 
 	evt = gf_dom_new_event(priv->js_ctx);
 	if (!evt) {
@@ -4745,8 +4965,7 @@ void gf_sg_handle_dom_event_for_vrml(GF_Node *node, GF_DOM_Event *event, GF_Node
 
 	prev_type = event->is_vrml;
 	event->is_vrml = 1;
-	SMJS_SET_PRIVATE(priv->js_ctx, priv->event, event);
-
+	SMJS_SET_PRIVATE(priv->js_ctx, priv->the_event, event);
 
 	SMJS_SET_PRIVATE(priv->js_ctx, evt, event);
 	argv[0] = OBJECT_TO_JSVAL(evt);
@@ -4765,7 +4984,7 @@ void gf_sg_handle_dom_event_for_vrml(GF_Node *node, GF_DOM_Event *event, GF_Node
 	}
 
 	event->is_vrml = prev_type;
-	SMJS_SET_PRIVATE(priv->js_ctx, priv->event, prev_event);
+	SMJS_SET_PRIVATE(priv->js_ctx, priv->the_event, prev_event);
 
 	gf_sg_lock_javascript(priv->js_ctx, 0);
 
@@ -4798,7 +5017,7 @@ GF_EXPORT
 GF_Node *gf_sg_js_get_node(JSContext *c, JSObject *obj)
 {
 #ifndef GPAC_DISABLE_VRML
-	if (js_rt && JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) {
+	if (js_rt && GF_JS_InstanceOf(c, obj, &js_rt->SFNodeClass, NULL) ) {
 		GF_JSField *ptr = (GF_JSField *) SMJS_GET_PRIVATE(c, obj);
 		if (ptr->field.fieldType==GF_SG_VRML_SFNODE) return * ((GF_Node **)ptr->field.far_ptr);
 	}
@@ -4817,7 +5036,7 @@ GF_Node *gf_sg_js_get_node(JSContext *c, JSObject *obj)
 
 #endif
 
-
+GF_EXPORT
 Bool gf_sg_has_scripting()
 {
 #ifdef GPAC_HAS_SPIDERMONKEY
@@ -4888,4 +5107,28 @@ Bool gf_sg_try_lock_javascript(struct JSContext *cx)
 	}
 	return 0;
 }
+
 #endif /* GPAC_HAS_SPIDERMONKEY */
+
+GF_Err gf_scene_execute_script(GF_SceneGraph *sg, const char *com)
+{
+#if defined(GPAC_HAS_SPIDERMONKEY) && !defined(GPAC_DISABLE_SVG)
+	u32 tag;
+	GF_Err e;
+	GF_Node *root = gf_sg_get_root_node(sg);
+	if (root) {
+		tag = gf_node_get_tag(root);
+		if (tag >= GF_NODE_RANGE_FIRST_SVG) {
+			GF_SVGJS *svg_js = sg->svg_js;
+			Bool ret = svg_js->script_execute(sg, (char *)com, NULL);
+			return (ret == GF_TRUE ? GF_OK : GF_BAD_PARAM);
+		} else {
+			e = GF_NOT_SUPPORTED;
+			return e;
+		}
+	}
+	return GF_BAD_PARAM;
+#else
+	return GF_NOT_SUPPORTED;
+#endif
+}

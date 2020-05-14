@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -84,7 +84,7 @@ void gf_odf_delete_qos_qual(GF_QoS_Default *qos)
 		return;
 
 	default:
-		if ( ((GF_QoS_Private *)qos)->DataLength)
+		if ( ((GF_QoS_Private *)qos)->Data)
 			gf_free(((GF_QoS_Private *)qos)->Data);
 		gf_free( (GF_QoS_Private *) qos);
 		return;
@@ -122,7 +122,7 @@ GF_Err gf_odf_write_qos_qual(GF_BitStream *bs, GF_QoS_Default *qos)
 {
 	GF_Err e;
 	if (!bs || !qos) return GF_BAD_PARAM;
-	
+
 	e = gf_odf_size_qos_qual(qos);
 	if (e) return e;
 	e = gf_odf_write_base_descriptor(bs, qos->tag, qos->size);
@@ -186,9 +186,17 @@ GF_Err gf_odf_parse_qos(GF_BitStream *bs, GF_QoS_Default **qos_qual, u32 *qual_s
 	do {
 		val = gf_bs_read_int(bs, 8);
 		sizeHeader++;
+		if (sizeHeader > 5) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_CODEC, ("[ODF] Descriptor size on more than 4 bytes\n"));
+			return GF_ODF_INVALID_DESCRIPTOR;
+		}
 		qos_size <<= 7;
 		qos_size |= val & 0x7F;
 	} while ( val & 0x80 );
+	if (gf_bs_available(bs) < qos_size) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_CODEC, ("[ODF] Not enough bytes (%d) to read descriptor (size=%d)\n", gf_bs_available(bs), qos_size));
+		return GF_ODF_INVALID_DESCRIPTOR;
+	}
 	bytesParsed += sizeHeader;
 
 	//Payload
@@ -242,9 +250,13 @@ GF_Err gf_odf_parse_qos(GF_BitStream *bs, GF_QoS_Default **qos_qual, u32 *qual_s
 	default:
 		//we defined the private qos...
 		newQoS = (GF_QoS_Default *) gf_malloc(sizeof(GF_QoS_Private));
+		((GF_QoS_Private *)newQoS)->Data = NULL;
 		((GF_QoS_Private *)newQoS)->DataLength = qos_size;
-		gf_bs_read_data(bs, ((GF_QoS_Private *)newQoS)->Data, ((GF_QoS_Private *)newQoS)->DataLength);
-		bytesParsed += ((GF_QoS_Private *)newQoS)->DataLength;
+		if (qos_size > 0) {
+			((GF_QoS_Private *)newQoS)->Data = (char *) gf_malloc( qos_size );
+			gf_bs_read_data(bs, ((GF_QoS_Private *)newQoS)->Data, ((GF_QoS_Private *)newQoS)->DataLength);
+			bytesParsed += ((GF_QoS_Private *)newQoS)->DataLength;
+		}
 		break;
 	}
 	newQoS->size = qos_size;
@@ -347,6 +359,7 @@ GF_Err gf_odf_del_qos(GF_QoS_Descriptor *qos)
 		gf_list_rem(qos->QoS_Qualifiers, 0);
 	}
 	gf_list_del(qos->QoS_Qualifiers);
+	gf_free(qos);
 	return GF_OK;
 }
 
@@ -365,13 +378,14 @@ GF_Err gf_odf_read_qos(GF_BitStream *bs, GF_QoS_Descriptor *qos, u32 DescSize)
 	nbBytes += 1;
 
 	if (qos->predefined) {
-		if (nbBytes != DescSize) return GF_ODF_INVALID_DESCRIPTOR;		
+		if (nbBytes != DescSize) return GF_ODF_INVALID_DESCRIPTOR;
 		return GF_OK;
 	}
 
 	while (nbBytes < DescSize) {
 		tmp = NULL;
 		e = gf_odf_parse_qos(bs, &tmp, &tmp_size);
+		if (e) return e;
 		if (!tmp) return GF_ODF_INVALID_DESCRIPTOR;
 		e = gf_list_add(qos->QoS_Qualifiers, tmp);
 		if (e) return e;
@@ -394,9 +408,9 @@ GF_Err gf_odf_size_qos(GF_QoS_Descriptor *qos, u32 *outSize)
 	GF_QoS_Default *tmp;
 
 	if (!qos) return GF_BAD_PARAM;
-	
+
 	*outSize = 1;
-	
+
 	i=0;
 	while ((tmp = (GF_QoS_Default *)gf_list_enum(qos->QoS_Qualifiers, &i))) {
 		e = gf_odf_size_qos_qual(tmp);
@@ -435,4 +449,3 @@ GF_Err gf_odf_write_qos(GF_BitStream *bs, GF_QoS_Descriptor *qos)
 
 
 #endif /*GPAC_MINIMAL_ODF*/
-

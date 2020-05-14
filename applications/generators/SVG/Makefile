@@ -35,7 +35,7 @@ SRCS := $(OBJS:.o=.c)
 all: $(PROG)
 
 SVGGen$(EXE): $(OBJS) 
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(XML2_LIBS) $(EXTRALIBS) -L../../../bin/gcc -L../../../extra_lib/lib/gcc -lgpac -lz
+	$(CC) -o $@ $(OBJS) $(XML2_LIBS) $(EXTRALIBS) -L../../../bin/gcc -L../../../extra_lib/lib/gcc -lgpac -lz $(LDFLAGS)
 
 
 %.o: %.c
@@ -54,10 +54,4 @@ depend:
 distclean: clean
 	rm -f Makefile.bak .depend
 
-
-
-# include dependency files if they exist
-#
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+-include .depend

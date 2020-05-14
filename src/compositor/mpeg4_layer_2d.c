@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -50,19 +50,19 @@ static void l2d_CheckBindables(GF_Node *n, GF_TraverseState *tr_state, Bool forc
 	l2d = (M_Layer2D *)n;
 	if (force_traverse) gf_node_traverse(l2d->background, tr_state);
 	btop = (GF_Node*)gf_list_get(tr_state->backgrounds, 0);
-	if (btop != l2d->background) { 
+	if (btop != l2d->background) {
 		gf_node_unregister(l2d->background, n);
-		gf_node_register(btop, n); 
+		gf_node_register(btop, n);
 		l2d->background = btop;
-		gf_node_event_out_str(n, "background");
+		gf_node_event_out(n, 4/*"background"*/);
 	}
 	if (force_traverse) gf_node_traverse(l2d->viewport, tr_state);
 	btop = (GF_Node*)gf_list_get(tr_state->viewpoints, 0);
-	if (btop != l2d->viewport) { 
+	if (btop != l2d->viewport) {
 		gf_node_unregister(l2d->viewport, n);
-		gf_node_register(btop, n); 
+		gf_node_register(btop, n);
 		l2d->viewport = btop;
-		gf_node_event_out_str(n, "viewport");
+		gf_node_event_out(n, 5/*"viewport"*/);
 	}
 }
 
@@ -71,23 +71,23 @@ static void l2d_CheckBindables(GF_Node *n, GF_TraverseState *tr_state, Bool forc
 static void rect_intersect(GF_Rect *rc1, GF_Rect *rc2)
 {
 	if (! gf_rect_overlaps(*rc1, *rc2)) {
-		rc1->width = rc1->height = 0; 
+		rc1->width = rc1->height = 0;
 		return;
 	}
 	if (rc2->x > rc1->x) {
 		rc1->width -= rc2->x - rc1->x;
 		rc1->x = rc2->x;
-	} 
+	}
 	if (rc2->x + rc2->width < rc1->x + rc1->width) {
 		rc1->width = rc2->width + rc2->x - rc1->x;
-	} 
+	}
 	if (rc2->y < rc1->y) {
-		rc1->height -= rc1->y - rc2->y; 
+		rc1->height -= rc1->y - rc2->y;
 		rc1->y = rc2->y;
-	} 
+	}
 	if (rc2->y - rc2->height > rc1->y - rc1->height) {
 		rc1->height = rc1->y - rc2->y + rc2->height;
-	} 
+	}
 }
 #endif
 
@@ -103,17 +103,17 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 	SFVec2f prev_vp;
 
 #ifndef GPAC_DISABLE_3D
-	GF_Matrix mx3d;
+	GF_Matrix mx3d, prev_layer_mx;
 	GF_List *oldf, *oldn;
 	GF_List *node_list_backup;
 	GF_Rect prev_clipper;
 	Bool had_clip;
 #endif
-	
+
 	M_Layer2D *l = (M_Layer2D *)node;
 	Layer2DStack *st = (Layer2DStack *) gf_node_get_private(node);
 	GF_TraverseState *tr_state = (GF_TraverseState *) rs;
-	
+
 	if (is_destroy) {
 		BindableStackDelete(st->backs);
 		BindableStackDelete(st->views);
@@ -124,7 +124,7 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 
 	/*layers can only be used in a 2D context*/
 #ifndef GPAC_DISABLE_3D
-	if (tr_state->visual->type_3d && tr_state->camera->is_3D) return;
+	if (tr_state->visual->type_3d && tr_state->camera && tr_state->camera->is_3D) return;
 #endif
 
 	/*layer2D maintains its own stacks*/
@@ -155,7 +155,7 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 		st->clip = gf_rect_center(st->clip.width, st->clip.height);
 		st->bounds = st->clip;
 	}
-	
+
 	prev_vp = tr_state->vp_size;
 	tr_state->vp_size.x = st->clip.width;
 	tr_state->vp_size.y = st->clip.height;
@@ -164,14 +164,17 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 	case TRAVERSE_SORT:
 #ifndef GPAC_DISABLE_3D
 		if (tr_state->visual->type_3d) {
+			gf_mx_copy(prev_layer_mx, tr_state->layer_matrix);
 			tr_state->layer_clipper = compositor_2d_update_clipper(tr_state, st->clip, &had_clip, &prev_clipper, 1);
 
-			visual_3d_matrix_push(tr_state->visual);
 			gf_mx_copy(mx3d, tr_state->model_matrix);
 
 			/*setup clipping*/
-			visual_3d_set_clipper_2d(tr_state->visual, tr_state->layer_clipper);
-			
+			if (had_clip) {
+				visual_3d_reset_clipper_2d(tr_state->visual);
+			}
+			visual_3d_set_clipper_2d(tr_state->visual, tr_state->layer_clipper, &mx3d);
+
 			/*apply background BEFORE viewport*/
 			if (back) {
 				tr_state->traversing_mode = TRAVERSE_BINDABLE;
@@ -184,7 +187,6 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 				tr_state->traversing_mode = TRAVERSE_BINDABLE;
 				tr_state->bounds = st->clip;
 				gf_node_traverse(viewport, tr_state);
-				visual_3d_matrix_add(tr_state->visual, tr_state->model_matrix.m);
 			}
 
 
@@ -202,8 +204,6 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 			gf_list_del(tr_state->visual->alpha_nodes_to_draw);
 			tr_state->visual->alpha_nodes_to_draw = node_list_backup;
 
-			
-			visual_3d_matrix_pop(tr_state->visual);
 			gf_mx_copy(tr_state->model_matrix, mx3d);
 
 			visual_3d_reset_clipper_2d(tr_state->visual);
@@ -211,16 +211,17 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 			tr_state->has_layer_clip = had_clip;
 			if (had_clip) {
 				tr_state->layer_clipper = prev_clipper;
-				visual_3d_set_clipper_2d(tr_state->visual, tr_state->layer_clipper);
+				gf_mx_copy(tr_state->layer_matrix, prev_layer_mx);
+				visual_3d_set_clipper_2d(tr_state->visual, tr_state->layer_clipper, &prev_layer_mx);
 			}
-		} else 
+		} else
 #endif
 		{
 			gf_mx2d_copy(backup, tr_state->transform);
 
 			prev_clip = tr_state->visual->top_clipper;
 			rc = st->clip;
-			
+
 			/*get clipper in world coordinate*/
 			gf_mx2d_apply_rect(&tr_state->transform, &rc);
 
@@ -236,6 +237,10 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 #endif
 			}
 
+			rc.x -= FIX_ONE;
+			rc.width += 2*FIX_ONE;
+			rc.y += FIX_ONE;
+			rc.height += 2*FIX_ONE;
 			tr_state->visual->top_clipper = gf_rect_pixelize(&rc);
 			gf_irect_intersect(&tr_state->visual->top_clipper, &prev_clip);
 			tr_state->traversing_mode = TRAVERSE_SORT;
@@ -273,15 +278,19 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 					if (!(ctx->drawable->flags & DRAWABLE_REGISTERED_WITH_VISUAL) ) {
 						struct _drawable_store *it;
 						GF_SAFEALLOC(it, struct _drawable_store);
-						it->drawable = ctx->drawable;
-						if (tr_state->visual->last_prev_entry) {
-							tr_state->visual->last_prev_entry->next = it;
-							tr_state->visual->last_prev_entry = it;
+						if (!it) {
+							GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Layer2D] Failed to allocate drawable store\n"));
 						} else {
-							tr_state->visual->prev_nodes = tr_state->visual->last_prev_entry = it;
+							it->drawable = ctx->drawable;
+							if (tr_state->visual->last_prev_entry) {
+								tr_state->visual->last_prev_entry->next = it;
+								tr_state->visual->last_prev_entry = it;
+							} else {
+								tr_state->visual->prev_nodes = tr_state->visual->last_prev_entry = it;
+							}
+							GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Layer2D] Registering new drawn node %s on visual\n", gf_node_get_class_name(it->drawable->node)));
+							ctx->drawable->flags |= DRAWABLE_REGISTERED_WITH_VISUAL;
 						}
-						GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Layer2D] Registering new drawn node %s on visual\n", gf_node_get_class_name(it->drawable->node)));
-						ctx->drawable->flags |= DRAWABLE_REGISTERED_WITH_VISUAL;
 					}
 				}
 
@@ -291,11 +300,11 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 			gf_mx2d_copy(tr_state->transform, backup);
 		}
 		break;
-		
-		/*check picking - we must fall in our 2D clipper*/
+
+	/*check picking - we must fall in our 2D clipper*/
 	case TRAVERSE_PICK:
 		if (gf_sc_pick_in_clipper(tr_state, &st->clip)) {
-		
+
 #ifndef GPAC_DISABLE_3D
 			if (tr_state->visual->type_3d) {
 				/*apply viewport*/
@@ -310,7 +319,7 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 				} else {
 					group_2d_traverse(node, (GroupingNode2D *)st, tr_state);
 				}
-			} else 
+			} else
 #endif
 			{
 				if (viewport) {
@@ -324,7 +333,7 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 				} else {
 					group_2d_traverse(node, (GroupingNode2D *)st, tr_state);
 				}
-			}	
+			}
 		}
 		break;
 	case TRAVERSE_GET_BOUNDS:
@@ -349,7 +358,7 @@ static void TraverseLayer2D(GF_Node *node, void *rs, Bool is_destroy)
 		break;
 #endif
 	}
-	
+
 	/*restore traversing state*/
 	tr_state->vp_size = prev_vp;
 	tr_state->backgrounds = oldb;
@@ -371,6 +380,10 @@ void compositor_init_layer2d(GF_Compositor *compositor, GF_Node *node)
 {
 	Layer2DStack *stack;
 	GF_SAFEALLOC(stack, Layer2DStack);
+	if (!stack) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate layer2d stack\n"));
+		return;
+	}
 
 	stack->backs = gf_list_new();
 	stack->views = gf_list_new();

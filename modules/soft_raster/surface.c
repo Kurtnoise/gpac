@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  *
  */
@@ -54,7 +54,7 @@ void evg_surface_delete(GF_SURFACE _this)
 {
 	EVGSurface *surf = (EVGSurface *)_this;
 	if (!surf)
-	  return;
+		return;
 #ifndef INLINE_POINT_CONVERSION
 	if (surf->points) gf_free(surf->points);
 	surf->points = NULL;
@@ -155,7 +155,7 @@ GF_Err evg_surface_attach_to_texture(GF_SURFACE _this, GF_STENCIL sten)
 {
 	u32 BPP;
 	EVGSurface *surf = (EVGSurface *)_this;
-	EVG_Texture *tx = (EVG_Texture *) sten;;
+	EVG_Texture *tx = (EVG_Texture *) sten;
 	if (!surf || (tx->type != GF_STENCIL_TEXTURE)) return GF_BAD_PARAM;
 
 	switch (tx->pixel_format) {
@@ -216,7 +216,7 @@ GF_Err evg_surface_clear(GF_SURFACE _this, GF_IRect *rc, u32 color)
 	EVGSurface *surf = (EVGSurface *)_this;
 	if (!surf) return GF_BAD_PARAM;
 
-	if (rc) {	
+	if (rc) {
 		s32 _x, _y;
 		if (surf->center_coords) {
 			_x = rc->x + surf->width / 2;
@@ -247,7 +247,7 @@ GF_Err evg_surface_clear(GF_SURFACE _this, GF_IRect *rc, u32 color)
 		clear.width = surf->width;
 		clear.height = surf->height;
 	}
-	
+
 	if (surf->raster_cbk) {
 		surf->raster_fill_rectangle(surf->raster_cbk, clear.x, clear.y, clear.width, clear.height, color);
 		return GF_OK;
@@ -341,19 +341,19 @@ GF_Err evg_surface_set_clipper(GF_SURFACE _this , GF_IRect *rc)
 static Bool setup_grey_callback(EVGSurface *surf)
 {
 	u32 col, a;
-	Bool use_const = 1;
+	Bool use_const = GF_TRUE;
 
 	if (surf->sten->type == GF_STENCIL_SOLID) {
 		col = surf->fill_col = ((EVG_Brush *)surf->sten)->color;
 		a = GF_COL_A(surf->fill_col);
 	} else {
 		col = a = 0;
-		use_const = 0;
+		use_const = GF_FALSE;
 	}
-	
+
 	if (surf->raster_cbk) {
 		if (use_const) {
-			if (!a) return 0;
+			if (!a) return GF_FALSE;
 			if (a!=0xFF) {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_user_fill_const_a;
 			} else {
@@ -362,13 +362,13 @@ static Bool setup_grey_callback(EVGSurface *surf)
 		} else {
 			surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_user_fill_var;
 		}
-		return 1;
+		return GF_TRUE;
 	}
 
 	switch (surf->pixelFormat) {
 	case GF_PIXEL_ARGB:
 		if (use_const) {
-			if (!a) return 0;
+			if (!a) return GF_FALSE;
 			if (a!=0xFF) {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_bgra_fill_const_a;
 			} else {
@@ -381,8 +381,9 @@ static Bool setup_grey_callback(EVGSurface *surf)
 
 	case GF_PIXEL_RGBA:
 		if (use_const) {
-			if (!a) return 0;
-			if (a!=0xFF) {
+			if (!a) {
+				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_rgba_fill_erase;
+			} else if (a!=0xFF) {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_rgba_fill_const_a;
 			} else {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_rgba_fill_const;
@@ -394,7 +395,7 @@ static Bool setup_grey_callback(EVGSurface *surf)
 
 	case GF_PIXEL_RGB_32:
 		if (use_const) {
-			if (!a) return 0;
+			if (!a) return GF_FALSE;
 			if (a!=0xFF) {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_bgrx_fill_const_a;
 			} else {
@@ -407,7 +408,7 @@ static Bool setup_grey_callback(EVGSurface *surf)
 
 	case GF_PIXEL_BGR_32:
 		if (use_const) {
-			if (!a) return 0;
+			if (!a) return GF_FALSE;
 			if (a!=0xFF) {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_rgbx_fill_const_a;
 			} else {
@@ -420,7 +421,7 @@ static Bool setup_grey_callback(EVGSurface *surf)
 
 	case GF_PIXEL_RGB_24:
 		if (use_const) {
-			if (!a) return 0;
+			if (!a) return GF_FALSE;
 			if (a!=0xFF) {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_rgb_fill_const_a;
 			} else {
@@ -432,7 +433,7 @@ static Bool setup_grey_callback(EVGSurface *surf)
 		break;
 	case GF_PIXEL_BGR_24:
 		if (use_const) {
-			if (!a) return 0;
+			if (!a) return GF_FALSE;
 			if (a!=0xFF) {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_bgr_fill_const_a;
 			} else {
@@ -445,7 +446,7 @@ static Bool setup_grey_callback(EVGSurface *surf)
 	case GF_PIXEL_RGB_565:
 		if (use_const) {
 			surf->fill_565 = GF_COL_TO_565(col);
-			if (!a) return 0;
+			if (!a) return GF_FALSE;
 			if (a!=0xFF) {
 				surf->ftparams.gray_spans = (EVG_Raster_Span_Func) evg_565_fill_const_a;
 			} else {
@@ -486,7 +487,7 @@ static Bool setup_grey_callback(EVGSurface *surf)
 		break;
 #endif
 	}
-	return 1;
+	return GF_TRUE;
 }
 
 
@@ -533,7 +534,7 @@ GF_Err evg_surface_set_path(GF_SURFACE _this, GF_Path *gp)
 		surf->pointlen = gp->n_points;
 	}
 	surf->ftoutline.points = surf->points;
-	
+
 	for (i=0; i<gp->n_points; i++) {
 		pt = gp->points[i];
 		gf_mx2d_apply_point(&surf->mat, &pt);
@@ -566,11 +567,11 @@ GF_Err evg_surface_fill(GF_SURFACE _this, GF_STENCIL stencil)
 	/*setup ft raster calllbacks*/
 	if (!setup_grey_callback(surf)) return GF_OK;
 
-/*	surf->ftparams.gray_spans = gray_spans_stub; */
+	/*	surf->ftparams.gray_spans = gray_spans_stub; */
 
 	get_surface_world_matrix(surf, &mat);
 
-	restore_filter = 0;
+	restore_filter = GF_FALSE;
 	/*get path frame for texture convertion */
 	if (sten->type != GF_STENCIL_SOLID) {
 		rc = surf->path_bounds;
@@ -598,7 +599,7 @@ GF_Err evg_surface_fill(GF_SURFACE _this, GF_STENCIL stencil)
 			gf_mx2d_inverse(&sten->smat);
 			evg_bmp_init(sten);
 			if (((EVG_Texture *)sten)->filter == GF_TEXTURE_FILTER_DEFAULT) {
-				restore_filter = 1;
+				restore_filter = GF_TRUE;
 				((EVG_Texture *)sten)->filter = surf->texture_filter;
 			}
 
@@ -614,7 +615,7 @@ GF_Err evg_surface_fill(GF_SURFACE _this, GF_STENCIL stencil)
 			gf_mx2d_add_scale(&sten->smat, INT2FIX(1<<EVGGRADIENTBITS), INT2FIX(1<<EVGGRADIENTBITS));
 
 		}
-			break;
+		break;
 		case GF_STENCIL_RADIAL_GRADIENT:
 		{
 			EVG_RadialGradient *rad = (EVG_RadialGradient*)sten;
@@ -629,7 +630,7 @@ GF_Err evg_surface_fill(GF_SURFACE _this, GF_STENCIL stencil)
 			/*init*/
 			evg_radial_init(rad);
 		}
-			break;
+		break;
 		}
 	}
 

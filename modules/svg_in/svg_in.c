@@ -1,7 +1,7 @@
 /*
  *					GPAC Multimedia Framework
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2005-2012
  *					All rights reserved
  *
@@ -27,9 +27,10 @@
 #include <gpac/internal/terminal_dev.h>
 #include <gpac/scene_manager.h>
 #include <gpac/constants.h>
-#include <zlib.h>
 
-#ifndef GPAC_DISABLE_SVG
+#if !defined(GPAC_DISABLE_SVG) && !defined(GPAC_DISABLE_ZLIB)
+
+#include <zlib.h>
 
 typedef struct
 {
@@ -47,13 +48,13 @@ typedef struct
 static Bool svg_check_download(SVGIn *svgin)
 {
 	u64 size;
-	FILE *f = gf_f64_open(svgin->file_name, "rb");
-	if (!f) return 0;
-	gf_f64_seek(f, 0, SEEK_END);
-	size = gf_f64_tell(f);
-	fclose(f);
-	if (size==svgin->file_size) return 1;
-	return 0;
+	FILE *f = gf_fopen(svgin->file_name, "rb");
+	if (!f) return GF_FALSE;
+	gf_fseek(f, 0, SEEK_END);
+	size = gf_ftell(f);
+	gf_fclose(f);
+	if (size==svgin->file_size) return GF_TRUE;
+	return GF_FALSE;
 }
 
 #define SVG_PROGRESSIVE_BUFFER_SIZE		4096
@@ -75,6 +76,7 @@ static GF_Err svgin_deflate(SVGIn *svgin, const char *buffer, u32 buffer_len)
 
 	err = inflateInit(&d_stream);
 	if (err == Z_OK) {
+		e = GF_OK;
 		while (d_stream.total_in < buffer_len) {
 			err = inflate(&d_stream, Z_NO_FLUSH);
 			if (err < Z_OK) {
@@ -82,20 +84,20 @@ static GF_Err svgin_deflate(SVGIn *svgin, const char *buffer, u32 buffer_len)
 				break;
 			}
 			svg_data[d_stream.total_out - done] = 0;
-			e = gf_sm_load_string(&svgin->loader, svg_data, 0);
+			e = gf_sm_load_string(&svgin->loader, svg_data, GF_FALSE);
 			if (e || (err== Z_STREAM_END)) break;
-			done = d_stream.total_out;
+			done = (u32) d_stream.total_out;
 			d_stream.avail_out = 2048;
 			d_stream.next_out = (Bytef*)svg_data;
 		}
 		inflateEnd(&d_stream);
-		return GF_OK;
+		return e;
 	}
 	return GF_NON_COMPLIANT_BITSTREAM;
 }
 
 static GF_Err SVG_ProcessData(GF_SceneDecoder *plug, const char *inBuffer, u32 inBufferLength,
-								u16 ES_ID, u32 stream_time, u32 mmlevel)
+                              u16 ES_ID, u32 stream_time, u32 mmlevel)
 {
 	GF_Err e = GF_OK;
 	SVGIn *svgin = (SVGIn *)plug->privateStack;
@@ -145,7 +147,6 @@ static GF_Err SVG_ProcessData(GF_SceneDecoder *plug, const char *inBuffer, u32 i
 				nb_read = gzread(svgin->src, file_buf, SVG_PROGRESSIVE_BUFFER_SIZE);
 				/*we may have read nothing but we still need to call parse in case the parser got suspended*/
 				if (nb_read<=0) {
-					nb_read = 0;
 					if ((e==GF_EOS) && gzeof(svgin->src)) {
 						gf_set_progress("SVG Parsing", svgin->file_pos, svgin->file_size);
 						gzclose(svgin->src);
@@ -157,7 +158,7 @@ static GF_Err SVG_ProcessData(GF_SceneDecoder *plug, const char *inBuffer, u32 i
 
 				file_buf[nb_read] = file_buf[nb_read+1] = 0;
 
-				e = gf_sm_load_string(&svgin->loader, file_buf, 0);
+				e = gf_sm_load_string(&svgin->loader, file_buf, GF_FALSE);
 				svgin->file_pos += nb_read;
 
 
@@ -177,7 +178,7 @@ static GF_Err SVG_ProcessData(GF_SceneDecoder *plug, const char *inBuffer, u32 i
 
 	/*!OTI for streaming SVG - GPAC internal*/
 	case GPAC_OTI_SCENE_SVG:
-		e = gf_sm_load_string(&svgin->loader, inBuffer, 0);
+		e = gf_sm_load_string(&svgin->loader, inBuffer, GF_FALSE);
 		break;
 
 	/*!OTI for streaming SVG + gz - GPAC internal*/
@@ -187,43 +188,43 @@ static GF_Err SVG_ProcessData(GF_SceneDecoder *plug, const char *inBuffer, u32 i
 
 	/*!OTI for DIMS (dsi = 3GPP DIMS configuration) - GPAC internal*/
 	case GPAC_OTI_SCENE_DIMS:
-		{
-			u8 prev, dims_hdr;
-			u32 nb_bytes, size;
-			u64 pos;
-			char * buf2 = gf_malloc(inBufferLength);
-			GF_BitStream *bs = gf_bs_new(inBuffer, inBufferLength, GF_BITSTREAM_READ);
-			memcpy(buf2, inBuffer, inBufferLength);
-//			FILE *f = gf_f64_open("dump.svg", "wb");
+	{
+		u8 prev, dims_hdr;
+		u32 nb_bytes, size;
+		u64 pos;
+		char * buf2 = gf_malloc(inBufferLength);
+		GF_BitStream *bs = gf_bs_new(inBuffer, inBufferLength, GF_BITSTREAM_READ);
+		memcpy(buf2, inBuffer, inBufferLength);
+//			FILE *f = gf_fopen("dump.svg", "wb");
 //
-			while (gf_bs_available(bs)) {
-				pos = gf_bs_get_position(bs);
-				size = gf_bs_read_u16(bs);
-				nb_bytes = 2;
-				/*GPAC internal hack*/
-				if (!size) {
-					size = gf_bs_read_u32(bs);
-					nb_bytes = 6;
-				}
+		while (gf_bs_available(bs)) {
+			pos = gf_bs_get_position(bs);
+			size = gf_bs_read_u16(bs);
+			nb_bytes = 2;
+			/*GPAC internal hack*/
+			if (!size) {
+				size = gf_bs_read_u32(bs);
+				nb_bytes = 6;
+			}
 //	            gf_fwrite( inBuffer + pos + nb_bytes + 1, 1, size - 1, f );
 
-				dims_hdr = gf_bs_read_u8(bs);
-				prev = buf2[pos + nb_bytes + size];
+			dims_hdr = gf_bs_read_u8(bs);
+			prev = buf2[pos + nb_bytes + size];
 
-				buf2[pos + nb_bytes + size] = 0;
-				if (dims_hdr & GF_DIMS_UNIT_C) {
-					e = svgin_deflate(svgin, buf2 + pos + nb_bytes + 1, size - 1);
-				} else {
-					e = gf_sm_load_string(&svgin->loader, buf2 + pos + nb_bytes + 1, 0);
-				}
-				buf2[pos + nb_bytes + size] = prev;
-				gf_bs_skip_bytes(bs, size-1);
-
+			buf2[pos + nb_bytes + size] = 0;
+			if (dims_hdr & GF_DIMS_UNIT_C) {
+				e = svgin_deflate(svgin, buf2 + pos + nb_bytes + 1, size - 1);
+			} else {
+				e = gf_sm_load_string(&svgin->loader, buf2 + pos + nb_bytes + 1, GF_FALSE);
 			}
-//          fclose(f);
-			gf_bs_del(bs);
+			buf2[pos + nb_bytes + size] = prev;
+			gf_bs_skip_bytes(bs, size-1);
+
 		}
-		break;
+//          gf_fclose(f);
+		gf_bs_del(bs);
+	}
+	break;
 
 	default:
 		return GF_BAD_PARAM;
@@ -343,7 +344,7 @@ static u32 SVG_CanHandleStream(GF_BaseDecoder *ifce, u32 StreamType, GF_ESD *esd
 	if (StreamType==GF_STREAM_PRIVATE_SCENE) {
 		/*media type query*/
 		if (!esd) return GF_CODEC_STREAM_TYPE_SUPPORTED;
-		
+
 		if (esd->decoderConfig->objectTypeIndication == GPAC_OTI_PRIVATE_SCENE_SVG) return GF_CODEC_SUPPORTED;
 		return GF_CODEC_NOT_SUPPORTED;
 	} else if (StreamType==GF_STREAM_SCENE) {
@@ -355,7 +356,7 @@ static u32 SVG_CanHandleStream(GF_BaseDecoder *ifce, u32 StreamType, GF_ESD *esd
 		case GPAC_OTI_SCENE_SVG_GZ:
 		case GPAC_OTI_SCENE_DIMS:
 			return GF_CODEC_SUPPORTED;
-		default:	
+		default:
 			return GF_CODEC_NOT_SUPPORTED;
 		}
 	}
@@ -377,13 +378,13 @@ static GF_Err SVG_SetCapabilities(GF_BaseDecoder *plug, GF_CodecCapability cap)
 {
 	if (cap.CapCode==GF_CODEC_ABORT) {
 		SVGIn *svgin = (SVGIn *)plug->privateStack;
-		gf_sm_load_suspend(&svgin->loader, 1);
+		gf_sm_load_suspend(&svgin->loader, GF_TRUE);
 	}
 	return GF_OK;
 }
 
 /*interface create*/
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	SVGIn *svgin;
@@ -392,9 +393,14 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	if (InterfaceType != GF_SCENE_DECODER_INTERFACE) return NULL;
 
 	GF_SAFEALLOC(sdec, GF_SceneDecoder)
+	if (!sdec) return NULL;
 	GF_REGISTER_MODULE_INTERFACE(sdec, GF_SCENE_DECODER_INTERFACE, "GPAC SVG Parser", "gpac distribution");
 
 	GF_SAFEALLOC(svgin, SVGIn);
+	if (!svgin) {
+		gf_free(sdec);
+		return NULL;
+	}
 	sdec->privateStack = svgin;
 	sdec->AttachStream = SVG_AttachStream;
 	sdec->CanHandleStream = SVG_CanHandleStream;
@@ -410,18 +416,18 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 
 
 /*interface destroy*/
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	SVGIn *svgin;
-        GF_SceneDecoder *sdec = (GF_SceneDecoder *)ifce;
-        if (!sdec)
-          return;
+	GF_SceneDecoder *sdec = (GF_SceneDecoder *)ifce;
+	if (!sdec)
+		return;
 	if (sdec->InterfaceType != GF_SCENE_DECODER_INTERFACE) return;
-        svgin = (SVGIn *) sdec->privateStack;
-        if (svgin)
-          gf_free(svgin);
-        sdec->privateStack = NULL;
+	svgin = (SVGIn *) sdec->privateStack;
+	if (svgin)
+		gf_free(svgin);
+	sdec->privateStack = NULL;
 	gf_free(sdec);
 }
 
@@ -429,7 +435,7 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 
 
 /*interface create*/
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	return NULL;
@@ -437,7 +443,7 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 
 
 /*interface destroy*/
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 }
@@ -445,7 +451,7 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 #endif
 
 /*interface query*/
-GF_EXPORT
+GPAC_MODULE_EXPORT
 const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
@@ -456,3 +462,5 @@ const u32 *QueryInterfaces()
 	};
 	return si;
 }
+
+GPAC_MODULE_STATIC_DECLARATION( svg_in )

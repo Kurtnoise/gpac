@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,17 +11,17 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- *		
+ *
  */
 
 
@@ -54,7 +54,7 @@ typedef struct _evg_surface EVGSurface;
 	GF_Matrix2D smat;					\
 	GF_Rect frame;					\
 	GF_ColorMatrix cmat;			\
-
+ 
 typedef struct _evg_base_stencil
 {
 	EVGBASESTENCIL
@@ -197,7 +197,7 @@ typedef struct
 		u32	col[EVGGRADIENTSLOTS];		\
 		Fixed pos[EVGGRADIENTSLOTS];	\
 		u8 alpha;		\
-
+ 
 typedef struct
 {
 	EVGBASESTENCIL
@@ -209,7 +209,7 @@ typedef struct
 {
 	EVGBASESTENCIL
 	EVGGRADIENT
-	
+
 	GF_Point2D start, end;
 	GF_Matrix2D vecmat;
 	s32	curp;
@@ -221,7 +221,7 @@ typedef struct
 {
 	EVGBASESTENCIL
 	EVGGRADIENT
-	
+
 	GF_Point2D center, focus, radius;
 	/*drawing state vars*/
 	GF_Point2D cur_p, d_f, d_i;
@@ -281,8 +281,6 @@ GF_Err evg_stencil_set_texture(GF_STENCIL st, char *pixels, u32 width, u32 heigh
 GF_Err evg_stencil_set_tiling(GF_STENCIL st, GF_TextureTiling mode);
 GF_Err evg_stencil_set_filter(GF_STENCIL st, GF_TextureFilter filter_mode);
 GF_Err evg_stencil_set_color_matrix(GF_STENCIL st, GF_ColorMatrix *cmat);
-GF_Err evg_stencil_reset_color_matrix(GF_STENCIL st);
-GF_Err evg_stencil_create_texture(GF_STENCIL st, u32 width, u32 height, GF_PixelFormat pixelFormat);
 
 
 
@@ -310,6 +308,7 @@ GF_Err evg_surface_clear_bgra(GF_SURFACE surf, GF_IRect rc, GF_Color col);
 void evg_rgba_fill_const(s32 y, s32 count, EVG_Span *spans, EVGSurface *surf);
 void evg_rgba_fill_const_a(s32 y, s32 count, EVG_Span *spans, EVGSurface *surf);
 void evg_rgba_fill_var(s32 y, s32 count, EVG_Span *spans, EVGSurface *surf);
+void evg_rgba_fill_erase(s32 y, s32 count, EVG_Span *spans, EVGSurface *surf);
 GF_Err evg_surface_clear_rgba(GF_SURFACE surf, GF_IRect rc, GF_Color col);
 
 void evg_bgrx_fill_const(s32 y, s32 count, EVG_Span *spans, EVGSurface *surf);
@@ -353,7 +352,6 @@ GF_Err evg_surface_clear_555(GF_SURFACE surf, GF_IRect rc, GF_Color col);
 void evg_user_fill_const(s32 y, s32 count, EVG_Span *spans, EVGSurface *surf);
 void evg_user_fill_const_a(s32 y, s32 count, EVG_Span *spans, EVGSurface *surf);
 void evg_user_fill_var(s32 y, s32 count, EVG_Span *spans, EVGSurface *surf);
-GF_Err evg_surface_clear_user(GF_SURFACE surf, GF_IRect rc, GF_Color col);
 
 
 
@@ -362,5 +360,5 @@ GF_Err evg_surface_clear_user(GF_SURFACE surf, GF_IRect rc, GF_Color col);
 }
 #endif
 
-#endif 
+#endif
 

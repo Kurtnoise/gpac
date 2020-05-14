@@ -43,7 +43,7 @@ private:
 // Overrides
 	// ClassWizard generated virtual function overrides
 	//{{AFX_VIRTUAL(CFileProps)
-	protected:
+protected:
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
 	//}}AFX_VIRTUAL
 
@@ -56,7 +56,7 @@ protected:
 	afx_msg void OnSelchangedOdtree(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnWorld();
 	afx_msg void OnViewsg();
-	afx_msg void OnTimer(UINT nIDEvent);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnClose();
 	afx_msg void OnDestroy();
 	afx_msg void OnSelchangeViewsel(NMHDR* pNMHDR, LRESULT* pResult);

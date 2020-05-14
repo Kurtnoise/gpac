@@ -9,6 +9,7 @@ include $(LOCAL_PATH)/base.mk
 #LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/android/libopenjpeg/jni/dist
 #LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/android/libopenjpeg/jni/
 
+LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/include
 LOCAL_C_INCLUDES 	+= $(LOCAL_PATH)/../../../../extra_lib/include/openjpeg
 LOCAL_LDLIBS    += -ljpegdroid -lopenjpeg -lpng
 

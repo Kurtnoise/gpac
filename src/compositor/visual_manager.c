@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -30,7 +30,7 @@
 #include <gpac/nodes_svg.h>
 #endif
 
-static Bool visual_draw_bitmap_stub(GF_VisualManager *visual, GF_TraverseState *tr_state, struct _drawable_context *ctx, GF_ColorKey *col_key)
+static Bool visual_draw_bitmap_stub(GF_VisualManager *visual, GF_TraverseState *tr_state, struct _drawable_context *ctx)
 {
 	return 0;
 }
@@ -40,6 +40,10 @@ GF_VisualManager *visual_new(GF_Compositor *compositor)
 {
 	GF_VisualManager *tmp;
 	GF_SAFEALLOC(tmp, GF_VisualManager);
+	if (!tmp) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate new visual\n"));
+		return NULL;
+	}
 
 	tmp->center_coords = 1;
 	tmp->compositor = compositor;
@@ -55,6 +59,7 @@ GF_VisualManager *visual_new(GF_Compositor *compositor)
 	tmp->ClearSurface = visual_2d_clear_surface;
 
 #ifndef GPAC_DISABLE_3D
+
 #ifndef GPAC_DISABLE_VRML
 	tmp->navigation_stack = gf_list_new();
 	tmp->fog_stack = gf_list_new();
@@ -92,6 +97,7 @@ void visual_del(GF_VisualManager *visual)
 
 #ifndef GPAC_DISABLE_3D
 	visual_3d_reset_graphics(visual);
+	ra_del(&visual->hybgl_drawn);
 
 #ifndef GPAC_DISABLE_VRML
 	if (visual->navigation_stack) BindableStackDelete(visual->navigation_stack);
@@ -143,9 +149,9 @@ void visual_clean_contexts(GF_VisualManager *visual)
 	while (ctx && ctx->drawable) {
 		/*remove visual registration flag*/
 		ctx->drawable->flags &= ~DRAWABLE_REGISTERED_WITH_VISUAL;
-		if (is_root_visual && (ctx->flags & CTX_HAS_APPEARANCE)) 
+		if (is_root_visual && (ctx->flags & CTX_HAS_APPEARANCE))
 			gf_node_dirty_reset(ctx->appear, 0);
-	
+
 #ifndef GPAC_DISABLE_3D
 		/*this may happen when switching a visual from 2D to 3D - discard context*/
 		if (visual->type_3d) ctx->drawable=NULL;
@@ -157,14 +163,14 @@ void visual_clean_contexts(GF_VisualManager *visual)
 	if (!is_root_visual) return;
 
 	/*reset all flags of all appearance nodes registered on all visuals but main one (done above)
-	this must be done once all visuals have been drawn, otherwise we won't detect the changes 
+	this must be done once all visuals have been drawn, otherwise we won't detect the changes
 	for nodes drawn on several visuals*/
 	count = gf_list_count(visual->compositor->visuals);
 	for (i=1; i<count; i++) {
 		GF_VisualManager *a_vis = gf_list_get(visual->compositor->visuals, i);
 		ctx = a_vis->context;
 		while (ctx && ctx->drawable) {
-			if (ctx->flags & CTX_HAS_APPEARANCE) 
+			if (ctx->flags & CTX_HAS_APPEARANCE)
 				gf_node_dirty_reset(ctx->appear, 0);
 
 			ctx->drawable = NULL;
@@ -177,9 +183,9 @@ Bool visual_draw_frame(GF_VisualManager *visual, GF_Node *root, GF_TraverseState
 {
 #ifndef GPAC_DISABLE_3D
 	if (visual->type_3d) {
-		GF_Err e = visual_3d_draw_frame(visual, root, tr_state, is_root_visual);
+		Bool res = visual_3d_draw_frame(visual, root, tr_state, is_root_visual);
 		visual_clean_contexts(visual);
-		return e;
+		return res;
 	}
 #endif
 	return visual_2d_draw_frame(visual, root, tr_state, is_root_visual);
@@ -206,9 +212,15 @@ void gf_sc_get_nodes_bounds(GF_Node *self, GF_ChildNodeItem *children, GF_Traver
 	size.x = size.y = -FIX_ONE;
 #ifndef GPAC_DISABLE_VRML
 	switch (gf_node_get_tag(self)) {
-	case TAG_MPEG4_Layer2D: size = ((M_Layer2D *)self)->size; break;
-	case TAG_MPEG4_Layer3D: size = ((M_Layer3D *)self)->size; break;
-	case TAG_MPEG4_Form: size = ((M_Form *)self)->size; break;
+	case TAG_MPEG4_Layer2D:
+		size = ((M_Layer2D *)self)->size;
+		break;
+	case TAG_MPEG4_Layer3D:
+		size = ((M_Layer3D *)self)->size;
+		break;
+	case TAG_MPEG4_Form:
+		size = ((M_Form *)self)->size;
+		break;
 	}
 #endif
 	if ((size.x>=0) && (size.y>=0)) {
@@ -229,7 +241,7 @@ void gf_sc_get_nodes_bounds(GF_Node *self, GF_ChildNodeItem *children, GF_Traver
 		tr_state->bounds = gf_rect_center(0,0);
 
 		/*we hit the target node*/
-		if (children->node == tr_state->for_node) 
+		if (children->node == tr_state->for_node)
 			tr_state->abort_bounds_traverse = 1;
 
 		gf_node_traverse(children->node, tr_state);
@@ -242,7 +254,7 @@ void gf_sc_get_nodes_bounds(GF_Node *self, GF_ChildNodeItem *children, GF_Traver
 		gf_mx2d_apply_rect(&tr_state->transform, &tr_state->bounds);
 		gf_rect_union(&rc, &tr_state->bounds);
 		children = children->next;
-		if (child_idx) 
+		if (child_idx)
 			break;
 	}
 
@@ -256,7 +268,7 @@ void gf_sc_get_nodes_bounds(GF_Node *self, GF_ChildNodeItem *children, GF_Traver
 				tr_state->bounds = gf_rect_center(0,0);
 
 				/*we hit the target node*/
-				if (iri == tr_state->for_node) 
+				if (iri == tr_state->for_node)
 					tr_state->abort_bounds_traverse = 1;
 
 				gf_node_traverse(iri, tr_state);
@@ -272,7 +284,7 @@ void gf_sc_get_nodes_bounds(GF_Node *self, GF_ChildNodeItem *children, GF_Traver
 		}
 	}
 #endif
-	
+
 	gf_mx2d_copy(tr_state->transform, cur_mx);
 	if (self != tr_state->for_node) {
 		gf_mx2d_apply_rect(&tr_state->transform, &rc);
@@ -286,6 +298,7 @@ void visual_reset_graphics(GF_VisualManager *visual)
 	if (visual->type_3d) {
 		visual_3d_reset_graphics(visual);
 	}
+	compositor_2d_reset_gl_auto(visual->compositor);
 #endif
 }
 

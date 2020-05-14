@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -42,6 +42,8 @@ void gf_sc_texture_reset(GF_TextureHandler *hdl);
 /*push data to hardware if needed, creating the hardware handle(s)*/
 Bool gf_sc_texture_push_image(GF_TextureHandler *txh, Bool generate_mipmaps, Bool for2d);
 
+/*refreshes hardware data for given rect (eg glTexSubImage)*/
+void gf_sc_texture_refresh_area(GF_TextureHandler *, GF_IRect *rc, void *mem);
 /*gets texture transform matrix - returns 1 if not identity
 @tx_transform: texture transform node from appearance*/
 Bool gf_sc_texture_get_transform(GF_TextureHandler *txh, GF_Node *tx_transform, GF_Matrix *mx, Bool for_picking);
@@ -52,6 +54,11 @@ GF_STENCIL gf_sc_texture_get_stencil(GF_TextureHandler *hdl);
 void gf_sc_texture_set_stencil(GF_TextureHandler *hdl, GF_STENCIL stencil);
 
 Bool gf_sc_texture_is_transparent(GF_TextureHandler *txh);
+
+void gf_sc_texture_check_pause_on_first_load(GF_TextureHandler *txh);
+
+/* configures conversion parameters and allocates the conv data buffer*/
+GF_Err gf_sc_texture_configure_conversion(GF_TextureHandler *txh);
 
 /*ALL THE FOLLOWING ARE ONLY AVAILABLE IN 3D AND DEAL WITH OPENGL TEXTURE MANAGEMENT*/
 #ifndef GPAC_DISABLE_3D
@@ -89,6 +96,9 @@ enum
 };
 /*set texturing blend mode*/
 void gf_sc_texture_set_blend_mode(GF_TextureHandler *txh, u32 mode);
+
+/*retrieves internal textureID used for the color plane (interleaved) or primary plane (YUV)*/
+u32 gf_sc_texture_get_gl_id(GF_TextureHandler *txh);
 
 #endif	/*GPAC_DISABLE_3D*/
 #ifdef __cplusplus

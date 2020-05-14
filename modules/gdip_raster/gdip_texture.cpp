@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -44,21 +44,21 @@ GF_Err gdip_set_texture(GF_STENCIL _this, char *pixels, u32 width, u32 height, u
 	gdip_cmat_reset(&_sten->cmat);
 	isBGR = 0;
 	BPP = 4;
-	copy = 0;
-	is_yuv = 0;
+	copy = GF_FALSE;
+	is_yuv = GF_FALSE;
 	/*is pixel format supported ?*/
 	switch (pixelFormat) {
 	case GF_PIXEL_GREYSCALE:
 		pFormat = PixelFormat24bppRGB;
 		BPP = 1;
 		/*no support for 8bit greyscale not indexed in GDIPlus ...*/
-		copy = 1;
+		copy = GF_TRUE;
 		break;
 	case GF_PIXEL_ALPHAGREY:
 		pFormat = PixelFormat32bppARGB;
 		BPP = 2;
 		/*cannot get it to work without using 32bpp argb*/
-		copy = 1;
+		copy = GF_TRUE;
 		break;
 	case GF_PIXEL_RGB_555:
 		pFormat = PixelFormat16bppRGB555;
@@ -90,7 +90,7 @@ GF_Err gdip_set_texture(GF_STENCIL _this, char *pixels, u32 width, u32 height, u
 	case GF_PIXEL_RGBA:
 		pFormat = PixelFormat32bppARGB;
 		BPP = 4;
-		copy = 1;
+		copy = GF_TRUE;
 		_sten->orig_buf = (unsigned char *) pixels;
 		break;
 	case GF_PIXEL_YV12:
@@ -98,11 +98,11 @@ GF_Err gdip_set_texture(GF_STENCIL _this, char *pixels, u32 width, u32 height, u
 	case GF_PIXEL_I420:
 		if ( (width*3)%4) return GF_NOT_SUPPORTED;
 		_sten->orig_format = GF_PIXEL_YV12;
-		is_yuv = 1;
+		is_yuv = GF_TRUE;
 		break;
 	case GF_PIXEL_YUVA:
 		_sten->orig_format = GF_PIXEL_YUVA;
-		is_yuv = 1;
+		is_yuv = GF_TRUE;
 		break;
 	default:
 		return GF_NOT_SUPPORTED;
@@ -116,18 +116,18 @@ GF_Err gdip_set_texture(GF_STENCIL _this, char *pixels, u32 width, u32 height, u
 	if (is_yuv) {
 		_sten->orig_buf = (unsigned char*)pixels;
 		_sten->orig_stride = stride;
-		_sten->is_converted = 0;
+		_sten->is_converted = GF_FALSE;
 		return GF_OK;
 	}
 
-	_sten->is_converted = 1;
+	_sten->is_converted = GF_TRUE;
 	_sten->format = pFormat;
 
 	/*GDIplus limitation : horiz_stride shall be multiple of 4 and no support for pure grayscale without palette*/
 	if (!copy && pixels && !(stride%4)) {
 		if (no_copy && isBGR) return GF_NOT_SUPPORTED;
 		GdipCreateBitmapFromScan0(_sten->width, _sten->height, stride, pFormat, (unsigned char*)pixels, &_sten->pBitmap);
-		_sten->invert_br = isBGR;
+		_sten->invert_br = isBGR ? GF_TRUE : GF_FALSE;
 	}
 	/*all other cases: create a local bitmap in desired format*/
 	else {
@@ -135,112 +135,67 @@ GF_Err gdip_set_texture(GF_STENCIL _this, char *pixels, u32 width, u32 height, u
 		GdipCreateBitmapFromScan0(_sten->width, _sten->height, 0, pFormat, NULL, &_sten->pBitmap);
 		ptr = pixels;
 		for (j=0; j<_sten->height; j++) {
-		for (i=0; i<_sten->width; i++) {
-			switch (pixelFormat) {
-			case GF_PIXEL_GREYSCALE:
-				r = *ptr++;
-				col = GF_COL_ARGB(255, r, r, r);
-				break;
-			case GF_PIXEL_ALPHAGREY:
-				r = *ptr++;
-				a = *ptr++;
-				col = GF_COL_ARGB(a, r, r, r);
-				break;
-			case GF_PIXEL_RGB_555:
-				val = * (unsigned short *) (ptr);
-				ptr+= 2;
-				col = COL_555(val);
-				break;
-			case GF_PIXEL_RGB_565:
-				val = * (unsigned short *) (ptr);
-				ptr+= 2;
-				col = COL_565(val);
-				break;
-			/*scan0 uses bgr...*/
-			case GF_PIXEL_BGR_24:
-			case GF_PIXEL_RGB_24:
-				r = *ptr++;
-				g = *ptr++;
-				b = *ptr++;
-				if (!isBGR) {
-					col = GF_COL_ARGB(255, b, g, r);
-				} else {
-					col = GF_COL_ARGB(255, r, g, b);
+			for (i=0; i<_sten->width; i++) {
+				switch (pixelFormat) {
+				case GF_PIXEL_GREYSCALE:
+					r = *ptr++;
+					col = GF_COL_ARGB(255, r, r, r);
+					break;
+				case GF_PIXEL_ALPHAGREY:
+					r = *ptr++;
+					a = *ptr++;
+					col = GF_COL_ARGB(a, r, r, r);
+					break;
+				case GF_PIXEL_RGB_555:
+					val = * (unsigned short *) (ptr);
+					ptr+= 2;
+					col = COL_555(val);
+					break;
+				case GF_PIXEL_RGB_565:
+					val = * (unsigned short *) (ptr);
+					ptr+= 2;
+					col = COL_565(val);
+					break;
+				/*scan0 uses bgr...*/
+				case GF_PIXEL_BGR_24:
+				case GF_PIXEL_RGB_24:
+					r = *ptr++;
+					g = *ptr++;
+					b = *ptr++;
+					if (!isBGR) {
+						col = GF_COL_ARGB(255, b, g, r);
+					} else {
+						col = GF_COL_ARGB(255, r, g, b);
+					}
+					break;
+				/*NOTE: we assume little-endian only for GDIplus platforms, so BGRA/BGRX*/
+				case GF_PIXEL_RGB_32:
+				case GF_PIXEL_ARGB:
+					b = *ptr++;
+					g = *ptr++;
+					r = *ptr++;
+					a = *ptr++;
+					if (pixelFormat==GF_PIXEL_RGB_32) a = 0xFF;
+					col = GF_COL_ARGB(a, r, g, b);
+					break;
+				case GF_PIXEL_RGBA:
+					r = *ptr++;
+					g = *ptr++;
+					b = *ptr++;
+					a = *ptr++;
+					col = GF_COL_ARGB(a, r, g, b);
+					break;
+				default:
+					col = GF_COL_ARGB(255, 255, 255, 255);
+					break;
 				}
-				break;
-			/*NOTE: we assume little-endian only for GDIplus platforms, so BGRA/BGRX*/
-			case GF_PIXEL_RGB_32:
-			case GF_PIXEL_ARGB:
-				b = *ptr++;
-				g = *ptr++;
-				r = *ptr++;
-				a = *ptr++;
-				if (pixelFormat==GF_PIXEL_RGB_32) a = 0xFF;
-				col = GF_COL_ARGB(a, r, g, b);
-				break;
-			case GF_PIXEL_RGBA:
-				r = *ptr++;
-				g = *ptr++;
-				b = *ptr++;
-				a = *ptr++;
-				col = GF_COL_ARGB(a, r, g, b);
-				break;
-			default:
-				col = GF_COL_ARGB(255, 255, 255, 255);
-				break;
+				GdipBitmapSetPixel(_sten->pBitmap, i, j, col);
 			}
-			GdipBitmapSetPixel(_sten->pBitmap, i, j, col);
-		}}
+		}
 	}
 
 	return GF_OK;
 }
-
-
-static
-GF_Err gdip_create_texture(GF_STENCIL _this, u32 width, u32 height, GF_PixelFormat pixelFormat)
-{
-	u32 pFormat;
-	GPSTEN();
-	CHECK_RET(GF_STENCIL_TEXTURE);
-
-	gdip_cmat_reset(&_sten->cmat);
-	/*is pixel format supported ?*/
-	switch (pixelFormat) {
-	case GF_PIXEL_BGR_24:
-	case GF_PIXEL_GREYSCALE:
-	case GF_PIXEL_RGB_24:
-		pFormat = PixelFormat24bppRGB;
-		break;
-	case GF_PIXEL_ALPHAGREY:
-		pFormat = PixelFormat32bppARGB;
-		break;
-	case GF_PIXEL_RGB_555:
-		pFormat = PixelFormat16bppRGB555;
-		break;
-	case GF_PIXEL_RGB_565:
-		pFormat = PixelFormat16bppRGB565;
-		break;
-	case GF_PIXEL_RGB_32:
-		pFormat = PixelFormat32bppRGB;
-		break;
-	case GF_PIXEL_ARGB:
-		pFormat = PixelFormat32bppARGB;
-		break;
-	default:
-		return GF_NOT_SUPPORTED;
-	}
-
-	if (_sten->pBitmap) GdipDisposeImage(_sten->pBitmap);
-	_sten->pBitmap = NULL;
-	_sten->width = width;
-	_sten->height = height;
-	_sten->is_converted = 1;
-	_sten->format = pFormat;
-	GdipCreateBitmapFromScan0(_sten->width, _sten->height, 0, pFormat, NULL, &_sten->pBitmap);
-	return GF_OK;
-}
-
 
 static
 GF_Err gdip_set_texture_repeat_mode(GF_STENCIL _this, GF_TextureTiling mode)
@@ -266,7 +221,7 @@ GF_Err gdip_set_color_matrix(GF_STENCIL _this, GF_ColorMatrix *cmat)
 	GPSTEN();
 	if (!cmat || cmat->identity) {
 		_sten->texture_invalid = _sten->has_cmat;
-		_sten->has_cmat = 0;
+		_sten->has_cmat = GF_FALSE;
 	} else {
 		if (_sten->invert_br) {
 			GF_ColorMatrix fin, rev;
@@ -282,9 +237,9 @@ GF_Err gdip_set_color_matrix(GF_STENCIL _this, GF_ColorMatrix *cmat)
 		} else {
 			cmat_gpac_to_gdip(cmat, &_sten->cmat);
 		}
-		_sten->has_cmat = 1;
+		_sten->has_cmat = GF_TRUE;
 	}
-	_sten->texture_invalid = 1;
+	_sten->texture_invalid = GF_TRUE;
 	return GF_OK;
 }
 
@@ -294,7 +249,7 @@ GF_Err gdip_set_alpha(GF_STENCIL _this, u8 alpha)
 	GPSTEN();
 	if (_sten->alpha != alpha) {
 		_sten->alpha = alpha;
-		_sten->texture_invalid = 1;
+		_sten->texture_invalid = GF_TRUE;
 	}
 	return GF_OK;
 }
@@ -385,9 +340,9 @@ void gdip_texture_modified(GF_STENCIL _this)
 {
 	GPSTEN();
 	if (_sten->orig_buf && (_sten->format == PixelFormat32bppARGB)) {
-		gdip_set_texture(_this, (char *) _sten->orig_buf, _sten->width, _sten->height, _sten->width * 4, GF_PIXEL_RGBA, GF_PIXEL_RGBA, 0);
+		gdip_set_texture(_this, (char *) _sten->orig_buf, _sten->width, _sten->height, _sten->width * 4, GF_PIXEL_RGBA, GF_PIXEL_RGBA, GF_FALSE);
 	}
-	_sten->texture_invalid = 1;
+	_sten->texture_invalid = GF_TRUE;
 }
 
 void gdip_init_driver_texture(GF_Raster2D *driver)
@@ -397,7 +352,6 @@ void gdip_init_driver_texture(GF_Raster2D *driver)
 	driver->stencil_set_filter = gdip_set_sr_texture_filter;
 	driver->stencil_set_color_matrix = gdip_set_color_matrix;
 	driver->stencil_set_alpha = gdip_set_alpha;
-	driver->stencil_create_texture = gdip_create_texture;
 	driver->stencil_texture_modified = gdip_texture_modified;
 }
 
@@ -422,6 +376,7 @@ void gdip_convert_texture(struct _stencil *sten)
 		sten->conv_buf = (unsigned char *) gf_malloc(sizeof(unsigned char)*sten->conv_size);
 	}
 
+	memset(&src, 0, sizeof(GF_VideoSurface));
 	src.height = sten->height;
 	src.width = sten->width;
 	src.pitch_x  =0;
@@ -429,17 +384,18 @@ void gdip_convert_texture(struct _stencil *sten)
 	src.pixel_format = sten->orig_format;
 	src.video_buffer = (char*)sten->orig_buf;
 
+	memset(&dst, 0, sizeof(GF_VideoSurface));
 	dst.width = sten->width;
 	dst.height = sten->height;
 	dst.pitch_x = 0;
 	dst.pitch_y = BPP*sten->width;
 	dst.video_buffer = (char*)sten->conv_buf;
 
-	gf_stretch_bits(&dst, &src, NULL, NULL, 0xFF, 0, NULL, NULL);
+	gf_stretch_bits(&dst, &src, NULL, NULL, 0xFF, GF_FALSE, NULL, NULL);
 
 	if (sten->pBitmap) GdipDisposeImage(sten->pBitmap);
 	GdipCreateBitmapFromScan0(sten->width, sten->height, BPP*sten->width, format, sten->conv_buf, &sten->pBitmap);
-	sten->is_converted = 1;
+	sten->is_converted = GF_TRUE;
 }
 
 void gdip_load_texture(struct _stencil *sten)
@@ -453,7 +409,7 @@ void gdip_load_texture(struct _stencil *sten)
 	}
 	/*nothing to do*/
 	if (sten->is_converted && sten->pTexture) return;
-	sten->texture_invalid = 0;
+	sten->texture_invalid = GF_FALSE;
 
 	/*convert*/
 	if (!sten->is_converted) gdip_convert_texture(sten);

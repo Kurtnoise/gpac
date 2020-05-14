@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -34,8 +34,7 @@ GF_Rect gf_rect_ft(GF_IRect *rc);
 Bool gf_irect_inside(GF_IRect *rc1, GF_IRect *rc2);
 
 /*@rc1 equales @rc2*/
-#define gf_rect_equal(rc1, rc2) ((rc1.width == rc2.width) && (rc1.height == rc2.height) && (rc1.x == rc2.x)  && (rc1.y == rc2.y)) 
-
+#define gf_rect_equal(rc1, rc2) ((rc1.width == rc2.width) && (rc1.height == rc2.height) && (rc1.x == rc2.x)  && (rc1.y == rc2.y))
 
 //#define TRACK_OPAQUE_REGIONS
 
@@ -43,45 +42,33 @@ Bool gf_irect_inside(GF_IRect *rc1, GF_IRect *rc2);
 #define RA_DEFAULT_STEP	10
 
 typedef struct
-{	
-	GF_IRect *list;
-	u32 count, alloc;
+{
+	GF_IRect rect;
 #ifdef TRACK_OPAQUE_REGIONS
 	/*list of nodes covering (no transparency) each rect, or 0 otherwise.*/
-	u32 *opaque_node_index;
+	u32 opaque_node_index;
 #endif
+} GF_RectArrayEntry;
+
+typedef struct
+{
+	GF_RectArrayEntry *list;
+	u32 count, alloc;
 } GF_RectArray;
 
-#ifdef TRACK_OPAQUE_REGIONS
-/*inits structure - called as a constructor*/
-#define ra_init(ra) { (ra)->count = 0; (ra)->alloc = RA_DEFAULT_STEP; (ra)->list = (GF_IRect*)gf_malloc(sizeof(GF_IRect)*(ra)->alloc); (ra)->opaque_node_index = NULL;}
+#define ra_init(ra) { (ra)->count = 0; (ra)->alloc = RA_DEFAULT_STEP; (ra)->list = (GF_RectArrayEntry*)gf_malloc(sizeof(GF_RectArrayEntry)*(ra)->alloc); }
 /*deletes structure - called as a destructor*/
-#define ra_del(ra) { gf_free((ra)->list); if ((ra)->opaque_node_index) { gf_free((ra)->opaque_node_index); (ra)->opaque_node_index = NULL; } }
+#define ra_del(ra) { if ((ra)->list) { gf_free((ra)->list); (ra)->list = NULL; } }
 
 
 /*adds rect to list - expand if needed*/
 #define ra_add(ra, rc) {	\
+	assert((rc)->width); 	\
 	if ((ra)->count==(ra)->alloc) { \
 		(ra)->alloc += RA_DEFAULT_STEP; \
-		(ra)->list = (GF_IRect*)gf_realloc((ra)->list, sizeof(GF_IRect) * (ra)->alloc); \
-		if ( (ra)->opaque_node_index) (ra)->opaque_node_index = (u32*)gf_realloc((ra)->opaque_node_index, sizeof(u32) * (ra)->alloc); \
+		(ra)->list = (GF_RectArrayEntry*)gf_realloc((ra)->list, sizeof(GF_RectArrayEntry) * (ra)->alloc); \
 	}	\
-	(ra)->list[(ra)->count] = *rc; (ra)->count++;	}
-
-#else
-#define ra_init(ra) { (ra)->count = 0; (ra)->alloc = RA_DEFAULT_STEP; (ra)->list = (GF_IRect*)gf_malloc(sizeof(GF_IRect)*(ra)->alloc);}
-/*deletes structure - called as a destructor*/
-#define ra_del(ra) { gf_free((ra)->list); }
-
-
-/*adds rect to list - expand if needed*/
-#define ra_add(ra, rc) {	\
-	if ((ra)->count==(ra)->alloc) { \
-		(ra)->alloc += RA_DEFAULT_STEP; \
-		(ra)->list = (GF_IRect*)gf_realloc((ra)->list, sizeof(GF_IRect) * (ra)->alloc); \
-	}	\
-	(ra)->list[(ra)->count] = *rc; (ra)->count++;	}
-#endif
+	(ra)->list[(ra)->count].rect = *rc; (ra)->count++;	}
 
 
 /*adds rectangle to the list performing union test*/
@@ -108,7 +95,7 @@ Bool visual_2d_node_cull(GF_TraverseState *tr_state, GF_Rect *bounds);
 
 void visual_2d_pick_node(GF_VisualManager *visual, GF_TraverseState *tr_state, GF_Event *ev, GF_ChildNodeItem *children);
 
-void visual_2d_clear_surface(GF_VisualManager *visual, GF_IRect *rc, u32 BackColor);
+void visual_2d_clear_surface(GF_VisualManager *visual, GF_IRect *rc, u32 BackColor, u32 is_offscreen);
 
 /*gets a drawable context on this visual*/
 DrawableContext *visual_2d_get_drawable_context(GF_VisualManager *visual);
@@ -136,11 +123,11 @@ void visual_2d_fill_rect(GF_VisualManager *visual, DrawableContext *ctx, GF_Rect
 
 /*extended version of above function to override texture transforms - needed for proper texturing of glyphs*/
 void visual_2d_texture_path_extended(GF_VisualManager *visual, GF_Path *path, GF_TextureHandler *txh, struct _drawable_context *ctx, GF_Rect *orig_bounds, GF_Matrix2D *ext_mx, GF_TraverseState *tr_state);
-void visual_2d_draw_path_extended(GF_VisualManager *visual, GF_Path *path, DrawableContext *ctx, GF_STENCIL brush, GF_STENCIL pen, GF_TraverseState *tr_state, GF_Rect *orig_bounds, GF_Matrix2D *ext_mx);
+void visual_2d_draw_path_extended(GF_VisualManager *visual, GF_Path *path, DrawableContext *ctx, GF_STENCIL brush, GF_STENCIL pen, GF_TraverseState *tr_state, GF_Rect *orig_bounds, GF_Matrix2D *ext_mx, Bool is_erase);
 
 
 /*video overlay context*/
-typedef struct _video_overlay 
+typedef struct _video_overlay
 {
 	struct _video_overlay *next;
 	GF_Window src, dst;
@@ -148,13 +135,18 @@ typedef struct _video_overlay
 	GF_RectArray ra;
 } GF_OverlayStack;
 
-/*check if the object is over an overlay. If so, adds its cliper to the list of rectangles to redraw for the overlay 
+/*check if the object is over an overlay. If so, adds its cliper to the list of rectangles to redraw for the overlay
 and returns 1 (in which case it shouldn't be drawn)*/
 Bool visual_2d_overlaps_overlay(GF_VisualManager *visual, DrawableContext *ctx, GF_TraverseState *tr_state);
 /*draw all partial overlays in software and all overlaping objects*/
 void visual_2d_flush_overlay_areas(GF_VisualManager *visual, GF_TraverseState *tr_state);
 /*finally blit the overlays - MUST be called once the main visual has been flushed*/
 void visual_2d_draw_overlays(GF_VisualManager *visual);
+
+
+#ifndef GPAC_DISABLE_3D
+void visual_2d_flush_hybgl_canvas(GF_VisualManager *visual, GF_TextureHandler *txh, struct _drawable_context *ctx, GF_TraverseState *tr_state);
+#endif
 
 #endif	/*_VISUAL_MANAGER_2D_*/
 

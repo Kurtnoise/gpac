@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -62,8 +62,10 @@ static FormGroup *form_new_group(FormStack *st)
 {
 	FormGroup *fg;
 	GF_SAFEALLOC(fg, FormGroup);
-	memset(&fg->final, 0, sizeof(GF_Rect));
-	memset(&fg->origin, 0, sizeof(GF_Rect));
+	if (!fg) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate form group\n"));
+		return NULL;
+	}
 	fg->children = gf_list_new();
 	gf_list_add(st->grouplist, fg);
 	return fg;
@@ -233,8 +235,8 @@ static void TraverseForm(GF_Node *n, void *rs, Bool is_destroy)
 		if (fm->size.y>=0) st->clip.height = fm->size.y;
 		st->bounds = st->clip = gf_rect_center(st->clip.width, st->clip.height);
 	}
-	recompute_form = 0;
-	if (gf_node_dirty_get(n)) recompute_form = 1;
+	recompute_form = GF_FALSE;
+	if (gf_node_dirty_get(n)) recompute_form = GF_TRUE;
 
 #if FORM_CLIPS
 	if ((tr_state->traversing_mode==TRAVERSE_GET_BOUNDS) && !tr_state->for_node) {
@@ -248,7 +250,7 @@ static void TraverseForm(GF_Node *n, void *rs, Bool is_destroy)
 
 	if (recompute_form) {
 		GF_Rect bounds;
-		GF_LOG(GF_LOG_COMPOSE, GF_LOG_DEBUG, ("[Form] Recomputing positions\n"));
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Form] Recomputing positions\n"));
 
 		parent_node_reset((ParentNode2D*)st);
 
@@ -292,6 +294,7 @@ static void TraverseForm(GF_Node *n, void *rs, Bool is_destroy)
 			gf_list_add(fg->children, cg);
 		}
 
+		memset(idx, 0, sizeof(u32)*MAX_FORM_GROUP_INDEX);
 		last_ind = 0;
 		for (i=0; i<fm->constraints.count; i++) {
 			index = 0;
@@ -324,7 +327,7 @@ static void TraverseForm(GF_Node *n, void *rs, Bool is_destroy)
 	}
 
 	/*check picking*/
-	if ((tr_state->traversing_mode==TRAVERSE_PICK) && !gf_sc_pick_in_clipper(tr_state, &st->clip)) 
+	if ((tr_state->traversing_mode==TRAVERSE_PICK) && !gf_sc_pick_in_clipper(tr_state, &st->clip))
 		return;
 
 #if !FORM_CLIPS
@@ -339,25 +342,34 @@ static void TraverseForm(GF_Node *n, void *rs, Bool is_destroy)
 	/*update clipper*/
 	if (tr_state->traversing_mode==TRAVERSE_SORT) {
 		prev_clip = tr_state->visual->top_clipper;
-		compositor_2d_update_clipper(tr_state, st->clip, &had_clip, &prev_clipper, 0);
+		compositor_2d_update_clipper(tr_state, st->clip, &had_clip, &prev_clipper, GF_FALSE);
 		if (tr_state->has_clip) {
 			tr_state->visual->top_clipper = gf_rect_pixelize(&tr_state->clipper);
 			gf_irect_intersect(&tr_state->visual->top_clipper, &prev_clip);
 		}
 
+#ifndef GPAC_DISABLE_3D
+		if (tr_state->visual->type_3d)
+			visual_3d_reset_clipper_2d(tr_state->visual);
+#endif
+
 		i=0;
-		while ((cg = gf_list_enum(st->groups, &i))) {
+		while ((cg = (ChildGroup*)gf_list_enum(st->groups, &i))) {
 			parent_node_child_traverse(cg, tr_state);
 		}
-	
+
+#ifndef GPAC_DISABLE_3D
+		if (tr_state->visual->type_3d)
+			visual_3d_reset_clipper_2d(tr_state->visual);
+#endif
 		tr_state->visual->top_clipper = prev_clip;
 		if (had_clip) tr_state->clipper = prev_clipper;
 		tr_state->has_clip = had_clip;
-	} else 
+	} else
 #endif
 	{
 		i=0;
-		while ((cg = gf_list_enum(st->groups, &i))) {
+		while ((cg = (ChildGroup*)gf_list_enum(st->groups, &i))) {
 			parent_node_child_traverse(cg, tr_state);
 		}
 	}
@@ -373,6 +385,10 @@ void compositor_init_form(GF_Compositor *compositor, GF_Node *node)
 {
 	FormStack *stack;
 	GF_SAFEALLOC(stack, FormStack);
+	if (!stack) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_COMPOSE, ("[Compositor] Failed to allocate form stack\n"));
+		return;
+	}
 
 	parent_node_setup((ParentNode2D*)stack);
 	stack->grouplist = gf_list_new();
@@ -408,9 +424,9 @@ static void shin_apply(FormStack *st, u32 *group_idx, u32 count)
 		if (!i) {
 			form_get_group(st, group_idx[0])->final.x = st->clip.x + inter_space;
 		} else {
-			form_get_group(st, group_idx[i])->final.x = 
-				form_get_group(st, group_idx[i-1])->final.x + form_get_group(st, group_idx[i-1])->final.width 
-				+ inter_space;
+			form_get_group(st, group_idx[i])->final.x =
+			    form_get_group(st, group_idx[i-1])->final.x + form_get_group(st, group_idx[i-1])->final.width
+			    + inter_space;
 		}
 		fg_update_bounds(form_get_group(st, group_idx[i]));
 	}
@@ -433,8 +449,8 @@ static void sh_apply(FormStack *st, Fixed space, u32 *group_idx, u32 count)
 		inter_space /= (count-1);
 	} else {
 		inter_space = space;
-	}	
-	
+	}
+
 	k = count - 1;
 	if (space != -1) k += 1;
 	for (i=1; i<k; i++) {
@@ -454,7 +470,7 @@ static void svin_apply(FormStack *st, u32 *group_idx, u32 count)
 	tot_len = 0;
 	inter_space = st->clip.height;
 	len = 0;
-	for (i=0; i<count;i++) {
+	for (i=0; i<count; i++) {
 		if (group_idx[i] != 0) {
 			tot_len += form_get_group(st, group_idx[i])->final.height;
 			len++;
@@ -462,15 +478,15 @@ static void svin_apply(FormStack *st, u32 *group_idx, u32 count)
 	}
 	inter_space -= tot_len;
 	inter_space /= (len+1);
-				
+
 	for (i=0; i<count; i++) {
 		if (group_idx[i] == 0) continue;
 		if (!i) {
 			form_get_group(st, group_idx[0])->final.y = st->clip.y - inter_space;
 		} else {
 			form_get_group(st, group_idx[i])->final.y =
-				form_get_group(st, group_idx[i-1])->final.y - form_get_group(st, group_idx[i-1])->final.height -
-				inter_space;				
+			    form_get_group(st, group_idx[i-1])->final.y - form_get_group(st, group_idx[i-1])->final.height -
+			    inter_space;
 		}
 		fg_update_bounds(form_get_group(st, group_idx[i]));
 	}
@@ -493,8 +509,8 @@ static void sv_apply(FormStack *st, Fixed space, u32 *group_idx, u32 count)
 		for (i=1; i<count-1; i++) tot_len += form_get_group(st, group_idx[i])->final.height;
 		inter_space -= tot_len;
 		inter_space /= count-1;
-	}	
-	
+	}
+
 	k = count-1;
 	if (space > -1) k += 1;
 	for (i=1; i<k; i++) {
@@ -544,7 +560,7 @@ static void ar_apply(FormStack *st, Fixed space, u32 *group_idx, u32 count)
 	start = 0;
 	rc = &form_get_group(st, group_idx[0])->final;
 	max_x = rc->x + rc->width;
-	
+
 	if(space>-FIX_ONE) {
 		max_x -= space;
 		start = 1;

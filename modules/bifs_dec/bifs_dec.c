@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -57,7 +57,7 @@ GF_Err BIFS_AttachScene(GF_SceneDecoder *plug, GF_Scene *scene, Bool is_scene_de
 	priv->pScene = scene;
 	priv->app = scene->root_od->term;
 
-	priv->codec = gf_bifs_decoder_new(scene->graph, 0);
+	priv->codec = gf_bifs_decoder_new(scene->graph, GF_FALSE);
 	gf_bifs_decoder_set_extraction_path(priv->codec, (char *) gf_modules_get_option((GF_BaseInterface *)plug, "General", "CacheDirectory"), scene->root_od->net_service->url);
 	/*ignore all size info on anim streams*/
 	if (!is_scene_decoder) gf_bifs_decoder_ignore_size_info(priv->codec);
@@ -95,7 +95,7 @@ static GF_Err BIFS_DetachStream(GF_BaseDecoder *plug, u16 ES_ID)
 }
 
 static GF_Err BIFS_ProcessData(GF_SceneDecoder*plug, const char *inBuffer, u32 inBufferLength,
-								u16 ES_ID, u32 AU_time, u32 mmlevel)
+                               u16 ES_ID, u32 AU_time, u32 mmlevel)
 {
 	Double ts_offset;
 	s32 time;
@@ -137,16 +137,16 @@ static u32 BIFS_CanHandleStream(GF_BaseDecoder *ifce, u32 StreamType, GF_ESD *es
 void DeleteBIFSDec(GF_BaseDecoder *plug)
 {
 	BIFSPriv *priv;
-        if (!plug)
-          return;
-        priv = (BIFSPriv *)plug->privateStack;
-        if (priv){
-          /*in case something went wrong*/
-          if (priv->codec) gf_bifs_decoder_del(priv->codec);
-          priv->codec = NULL;
-          gf_free(priv);
-          plug->privateStack = NULL;
-        }
+	if (!plug)
+		return;
+	priv = (BIFSPriv *)plug->privateStack;
+	if (priv) {
+		/*in case something went wrong*/
+		if (priv->codec) gf_bifs_decoder_del(priv->codec);
+		priv->codec = NULL;
+		gf_free(priv);
+		plug->privateStack = NULL;
+	}
 	gf_free(plug);
 }
 
@@ -158,6 +158,10 @@ GF_BaseDecoder *NewBIFSDec()
 	GF_SAFEALLOC(tmp, GF_SceneDecoder);
 	if (!tmp) return NULL;
 	GF_SAFEALLOC(priv, BIFSPriv);
+	if (!priv) {
+		gf_free(tmp);
+		return NULL;
+	}
 	priv->codec = NULL;
 	tmp->privateStack = priv;
 	tmp->AttachStream = BIFS_AttachStream;
@@ -176,7 +180,7 @@ GF_BaseDecoder *NewBIFSDec()
 #endif /*GPAC_DISABLE_BIFS*/
 
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
@@ -188,7 +192,7 @@ const u32 *QueryInterfaces()
 	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	switch (InterfaceType) {
@@ -201,7 +205,7 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	}
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -213,3 +217,4 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 	}
 }
 
+GPAC_MODULE_STATIC_DECLARATION( bifs )

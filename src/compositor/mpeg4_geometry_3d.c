@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -33,7 +33,7 @@
 #ifndef GPAC_DISABLE_3D
 
 #include <gpac/options.h>
-
+#include <gpac/mediaobject.h>
 
 void drawable_3d_base_traverse(GF_Node *n, void *rs, Bool is_destroy, void (*build_shape)(GF_Node*,Drawable3D *,GF_TraverseState *) )
 {
@@ -61,6 +61,12 @@ void drawable_3d_base_traverse(GF_Node *n, void *rs, Bool is_destroy, void (*bui
 	case TRAVERSE_PICK:
 		visual_3d_vrml_drawable_pick(n, tr_state, stack->mesh, NULL);
 		return;
+	case TRAVERSE_SORT:
+		//we are drawing 3D object but configured for 2D, force 3D
+		if (!tr_state->visual->type_3d && tr_state->visual->compositor->hybrid_opengl) {
+			tr_state->visual->compositor->root_visual_setup=0;
+			tr_state->visual->compositor->force_type_3d=1;
+		}
 	}
 }
 
@@ -115,14 +121,99 @@ void compositor_init_cylinder(GF_Compositor *compositor, GF_Node *node)
 }
 
 static void build_shape_sphere(GF_Node *n, Drawable3D *stack, GF_TraverseState *tr_state)
-{
+{	
 	M_Sphere *sp = (M_Sphere *)n;
-	mesh_new_sphere(stack->mesh, sp->radius, tr_state->visual->compositor->high_speed);
+	mesh_new_sphere(stack->mesh, sp->radius, tr_state->visual->compositor->high_speed, NULL);
+}
+
+static void get_tx_coords_from_angle(GF_TraverseState *tr_state, GF_TextureHandler *txh, Bool horizontal, u32 *min_coord, u32 *max_coord)
+{
+	GF_Vec target, ref;
+	Fixed dot, det, hfov, theta_angle, angle_start, angle_end, min_tx, max_tx;
+	u32 dim;
+	
+	ref.x = horizontal ? FIX_ONE : 0;
+	ref.y = horizontal ? 0 : FIX_ONE;
+	ref.z = 0;
+
+	target = camera_get_target_dir(tr_state->camera);
+	if (horizontal) target.y = 0;
+	else target.x = 0;
+	
+	gf_vec_norm(&target);
+	dot = gf_vec_dot(target, ref);
+	if (horizontal) {
+		det = target.x*ref.z - target.z*ref.x;
+	} else {
+		det = target.y*ref.z - target.z*ref.y;
+	}
+	theta_angle = gf_atan2(det, dot);
+	//sphere starts horizontally at -PI/2
+	if (horizontal) {
+		theta_angle -= GF_PI2;
+		hfov = tr_state->camera->fieldOfView*tr_state->camera->width/tr_state->camera->height/2;
+	} else {
+		hfov = tr_state->camera->fieldOfView/2;
+	}
+
+	angle_start = theta_angle - hfov;
+	angle_end = theta_angle + hfov;
+
+	//move everything in [-PI,PI]
+	if (angle_start < -GF_PI) angle_start += GF_2PI;
+	if (angle_start > GF_PI) angle_start -= GF_2PI;
+	if (angle_end < -GF_PI) angle_end += GF_2PI;
+	if (angle_end > GF_PI) angle_end -= GF_2PI;
+	
+	if (horizontal) {
+		//start angle corresponds to max tx horiz coord, left to min
+		max_tx = FIX_ONE - (angle_start + GF_PI) / GF_2PI;
+		min_tx = FIX_ONE - (angle_end + GF_PI) / GF_2PI;
+		//we wrap horizontally, which means we may have min_tx > max_tx, in which case we need both [min_tx, WIDTH] and [0, max_tx] parts of the texture
+		dim = txh->width;
+	} else {
+		//-angle is the same position as +angle
+		if (angle_start<0) angle_start = -angle_start;
+		if (angle_end<0) angle_end = -angle_end;
+		//SRD x=0 is the top of the sphere - we don't wrap vertically
+		if (angle_start<angle_end) {
+			min_tx = angle_start / GF_PI;
+			max_tx = angle_end / GF_PI;
+		} else {
+			max_tx = angle_start / GF_PI;
+			min_tx = angle_end / GF_PI;
+		}
+		dim = txh->height;
+	}
+	*min_coord= (u32) (min_tx*dim);
+	*max_coord= (u32) (max_tx*dim);
+
+//	fprintf(stderr, "%s Angle is %g (%g <-> %g) - min tx %g (%u) - max tx %g (%u)\n", horizontal ? "X" : "Y", theta_angle, angle_start, angle_end, min_tx, *min_coord, max_tx, *max_coord);
 }
 
 static void TraverseSphere(GF_Node *n, void *rs, Bool is_destroy)
 {
+	GF_TraverseState *tr_state = (GF_TraverseState *)rs;
 	drawable_3d_base_traverse(n, rs, is_destroy, build_shape_sphere);
+
+	if (!is_destroy && tr_state->traversing_mode == TRAVERSE_DRAW_3D) {
+		GF_MediaObjectVRInfo vrinfo;
+		u32 min_x, max_x, min_y, max_y;
+		GF_TextureHandler *txh = gf_sc_texture_get_handler( ((M_Appearance *) tr_state->appear)->texture );
+		
+		if (!txh || !txh->stream) return;
+		
+		if (!gf_mo_get_srd_info(txh->stream, &vrinfo) || !vrinfo.is_tiled_srd)
+			return;
+		
+		//we need to compute min/max tex coords visible for that sphere
+		
+		get_tx_coords_from_angle(tr_state, txh, GF_TRUE, &min_x, &max_x);
+		get_tx_coords_from_angle(tr_state, txh, GF_FALSE, &min_y, &max_y);
+		
+		gf_mo_hint_visible_rect(txh->stream, min_x, max_x, min_y, max_y);
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_COMPOSE, ("[Compositor] Visible texture rectangle of sphere is %u,%u,%u,%u\n", min_x, max_x, min_y, max_y));
+	}
 }
 
 void compositor_init_sphere(GF_Compositor *compositor, GF_Node *node)
@@ -304,12 +395,12 @@ void compositor_init_extrusion(GF_Compositor *compositor, GF_Node *node)
 /*
 			NonLinearDeformer
 
-	NOTE: AFX spec is just hmm, well, hmm. NonLinearDeformer.extend interpretation differ from type to 
+	NOTE: AFX spec is just hmm, well, hmm. NonLinearDeformer.extend interpretation differ from type to
 	type within the spec, and between the spec and the ref soft. This is GPAC interpretation
 	* all params are specified with default transform axis (Z axis)
 	* NLD.type = 0 (taper):
 		* taping radius = NLD.param
-		* extend = N * [diff, perc] with 
+		* extend = N * [diff, perc] with
 			- diff : relative position along taper axis (for default, diff=0: z min, diff=1: z max)
 			- perc: mult ratio for base taper radius
 		extend works like key/keyValue for a scalar interpolator
@@ -317,7 +408,7 @@ void compositor_init_extrusion(GF_Compositor *compositor, GF_Node *node)
 
 	* NLD.type = 1 (twister):
 		* twisting angle = NLD.param
-		* extend = N * [diff, perc] with 
+		* extend = N * [diff, perc] with
 			- diff : relative position along twister axis (for default, diff=0: z min, diff=1: z max)
 			- perc: mult ratio for base twister angle
 		extend works like key/keyValue for a scalar interpolator
@@ -325,16 +416,19 @@ void compositor_init_extrusion(GF_Compositor *compositor, GF_Node *node)
 
 	* NLD.type = 2 (bender):
 		* bending curvature = NLD.param
-		* extend = N * [diff, perc] with 
+		* extend = N * [diff, perc] with
 			- diff : relative position along bender axis (for default, diff=0: z min, diff=1: z max)
 			- perc: mult ratio for base bender curvature
 		extend works like key/keyValue for a scalar interpolator
 		final curvature: c(z) = LinearInterp(extend[min key], extend[min key + 1]) * param
 
   Another pb of NLD is that the spec says nothing about object/axis alignment: should we center
-  the object at 0,0,0 (local coords) or not? the results are quite different. Here we don't 
+  the object at 0,0,0 (local coords) or not? the results are quite different. Here we don't
   recenter the object before transform
-*/
+
+
+ TODO - think of a way to implement this through the vertex shader
+ */
 
 static Bool NLD_GetMatrix(M_NonLinearDeformer *nld, GF_Matrix *mx)
 {
@@ -345,7 +439,8 @@ static Bool NLD_GetMatrix(M_NonLinearDeformer *nld, GF_Matrix *mx)
 	/*compute rotation matrix from NLD axis to 0 0 1*/
 	v1 = nld->axis;
 	gf_vec_norm(&v1);
-	v2.x = v2.y = 0; v2.z = FIX_ONE;
+	v2.x = v2.y = 0;
+	v2.z = FIX_ONE;
 	if (gf_vec_equal(v1, v2)) return 0;
 
 	l1 = gf_vec_len(v1);
@@ -373,7 +468,7 @@ static GFINLINE void NLD_GetKey(M_NonLinearDeformer *nld, Fixed frac, Fixed *f_m
 		if (frac>=nld->extend.vals[i]) {
 			*f_min = nld->extend.vals[i];
 			*min = nld->extend.vals[i+1];
-		} 
+		}
 		if ((i+2<count) && (frac<=nld->extend.vals[i+2])) {
 			*f_max = nld->extend.vals[i+2];
 			*max = nld->extend.vals[i+3];
@@ -399,7 +494,7 @@ static void NLD_Apply(M_NonLinearDeformer *nld, GF_Mesh *mesh)
 
 	param = nld->param;
 	if (!param) param = 1;
-	
+
 	if (mesh->bounds.min_edge.z == mesh->bounds.max_edge.z) return;
 
 	z_min = FIX_MAX;
@@ -418,7 +513,7 @@ static void NLD_Apply(M_NonLinearDeformer *nld, GF_Mesh *mesh)
 		z_min = mesh->bounds.min_edge.z;
 		z_max = mesh->bounds.max_edge.z;
 	}
-	
+
 	for (i=0; i<mesh->v_count; i++) {
 		SFVec3f old = mesh->vertices[i].pos;
 		frac = gf_divfix(old.z - z_min, z_max - z_min);

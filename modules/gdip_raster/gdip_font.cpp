@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,15 +11,15 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  */
 
@@ -53,7 +53,7 @@ GF_Err gdip_shutdown_font_engine(GF_FontReader *dr)
 
 	if (ctx->font) GdipDeleteFontFamily(ctx->font);
 	ctx->font = NULL;
-	
+
 	/*nothing to do*/
 	return GF_OK;
 }
@@ -62,13 +62,14 @@ GF_Err gdip_shutdown_font_engine(GF_FontReader *dr)
 
 static GF_Err gdip_get_glyphs(GF_FontReader *dr, const char *utf_string, u32 *glyph_buffer, u32 *io_glyph_buffer_size, const char *xml_lang, Bool *is_rtl)
 {
+	size_t _len;
 	u32 len;
 	u32 i;
 	u16 *conv;
 	char *utf8 = (char*) utf_string;
 	FontPriv *priv = (FontPriv*)dr->udta;
 
-	len = utf_string ? strlen(utf_string) : 0;
+	len = utf_string ? (u32) strlen(utf_string) : 0;
 	if (!len) {
 		*io_glyph_buffer_size = 0;
 		return GF_OK;
@@ -77,8 +78,9 @@ static GF_Err gdip_get_glyphs(GF_FontReader *dr, const char *utf_string, u32 *gl
 		*io_glyph_buffer_size = len+1;
 		return GF_BUFFER_TOO_SMALL;
 	}
-	len = gf_utf8_mbstowcs((u16*) glyph_buffer, *io_glyph_buffer_size, (const char **) &utf8);
-	if ((s32) len<0) return GF_IO_ERR;
+	_len = gf_utf8_mbstowcs((u16*) glyph_buffer, *io_glyph_buffer_size, (const char **) &utf8);
+	if (_len==(size_t)-1) return GF_IO_ERR;
+	len = (u32) _len;
 	if (utf8) return GF_IO_ERR;
 
 	/*perform bidi relayout*/
@@ -101,7 +103,7 @@ static void adjust_white_space(const unsigned short *string, Float *width, Float
 		i++;
 	}
 	if (whiteSpaceWidth<0) return;
-	len = gf_utf8_wcslen(string);
+	len = (u32) gf_utf8_wcslen(string);
 	if (i != len) {
 		i = len - 1;
 		while (string[i] == (unsigned short) ' ') {
@@ -134,7 +136,7 @@ static GF_Err gdip_get_text_size(GF_FontReader *dr, const unsigned short *string
 
 	GdipDeleteStringFormat(fmt);
 	GdipDeletePath(path_tmp);
-	
+
 	return GF_OK;
 }
 
@@ -153,8 +155,8 @@ static GF_Err gdip_set_font(GF_FontReader *dr, const char *fontName, u32 styles)
 	else if (!stricmp(fontName, "SERIF")) fontName = ctx->font_serif;
 	else if (!stricmp(fontName, "TYPEWRITER") || !stricmp(fontName, "monospace")) fontName = ctx->font_fixed;
 
-	MultiByteToWideChar(CP_ACP, 0, fontName, strlen(fontName)+1, 
-						wcFontName, sizeof(wcFontName)/sizeof(wcFontName[0]) );
+	MultiByteToWideChar(CP_ACP, 0, fontName, (u32)strlen(fontName)+1,
+	                    wcFontName, sizeof(wcFontName)/sizeof(wcFontName[0]) );
 
 
 	GdipCreateFontFamilyFromName(wcFontName, NULL, &ctx->font);
@@ -170,7 +172,7 @@ static GF_Err gdip_set_font(GF_FontReader *dr, const char *fontName, u32 styles)
 	return GF_OK;
 }
 
-static GF_Err gdip_get_font_info(GF_FontReader *dr, char **font_name, s32 *em_size, s32 *ascent, s32 *descent, s32 *underline, s32 *line_spacing, s32 *max_advance_h, s32 *max_advance_v)
+static GF_Err gdip_get_font_info(GF_FontReader *dr, char **font_name, u32 *em_size, s32 *ascent, s32 *descent, s32 *underline, s32 *line_spacing, s32 *max_advance_h, s32 *max_advance_v)
 {
 	UINT16 val, em;
 	FontPriv *ctx = (FontPriv *)dr->udta;
@@ -185,7 +187,8 @@ static GF_Err gdip_get_font_info(GF_FontReader *dr, char **font_name, s32 *em_si
 	ctx->ascent = (Float) val;
 	*ascent = (s32) val;
 	GdipGetCellDescent(ctx->font, ctx->font_style, &val);
-	*descent = (s32) val; *descent *= -1;
+	*descent = (s32) val;
+	*descent *= -1;
 	ctx->descent = -1 * (Float) val;
 	*underline = *descent / 2;
 	GdipGetLineSpacing(ctx->font, ctx->font_style, &val);
@@ -240,7 +243,7 @@ static GF_Glyph *gdip_load_glyph(GF_FontReader *dr, u32 glyph_name)
 		est_advance_h = ctx->whitespace_width;
 	} else {
 		/*to compute first glyph alignment (say 'x', we figure out its bounding full box by using the '_' char as wrapper (eg, "_x_")
-		then the bounding box starting from xMin of the glyph ('x_'). The difference between both will give us a good approx 
+		then the bounding box starting from xMin of the glyph ('x_'). The difference between both will give us a good approx
 		of the glyph alignment*/
 		str[0] = glyph_name;
 		str[1] = (unsigned short) '_';
@@ -249,7 +252,7 @@ static GF_Glyph *gdip_load_glyph(GF_FontReader *dr, u32 glyph_name)
 		GdipGetPathWorldBounds(path_tmp, &rc, NULL, NULL);
 		est_advance_h = rc.Width - ctx->underscore_width;
 	}
-	
+
 	GdipResetPath(path_tmp);
 
 	str[0] = glyph_name;
@@ -282,7 +285,7 @@ static GF_Glyph *gdip_load_glyph(GF_FontReader *dr, u32 glyph_name)
 	for (i=0; i<count; ) {
 		BOOL closed = 0;
 		s32 sub_type;
-		
+
 		sub_type = types[i] & PathPointTypePathTypeMask;
 
 		if (sub_type == PathPointTypeStart) {
@@ -291,7 +294,7 @@ static GF_Glyph *gdip_load_glyph(GF_FontReader *dr, u32 glyph_name)
 		}
 		else if (sub_type == PathPointTypeLine) {
 			gf_path_add_line_to(glyph->path, FLT2FIX(pts[i].X), FLT2FIX(pts[i].Y));
-		
+
 			if (types[i] & PathPointTypeCloseSubpath) gf_path_close(glyph->path);
 
 			i++;
@@ -308,7 +311,7 @@ static GF_Glyph *gdip_load_glyph(GF_FontReader *dr, u32 glyph_name)
 			break;
 		}
 	}
-	
+
 	delete [] pts;
 	delete [] types;
 	GdipDeleteStringFormat(fmt);
@@ -365,8 +368,8 @@ void gdip_delete_font_driver(GF_FontReader *dr)
 extern "C" {
 #endif
 
-GF_EXPORT
-const u32 *QueryInterfaces() 
+GPAC_MODULE_EXPORT
+const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
 		GF_FONT_READER_INTERFACE,
@@ -376,7 +379,7 @@ const u32 *QueryInterfaces()
 	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	if (InterfaceType==GF_FONT_READER_INTERFACE) return (GF_BaseInterface *)gdip_new_font_driver();
@@ -384,7 +387,7 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -396,6 +399,8 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 		break;
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( gdiplus )
 
 #ifdef __cplusplus
 }

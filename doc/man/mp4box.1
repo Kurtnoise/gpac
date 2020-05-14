@@ -139,7 +139,7 @@ forces creation of a new destination file.
 sets the language of all tracks or the given track. LAN is the ISO 639-2 3 character code.
 .TP
 .B -delay [tkID=]delay_ms
-sets the delay in milliseconds of all tracks or the given track. LAN is the ISO 639-2 3 character code.
+sets the delay in milliseconds of all tracks or the given track.
 .TP
 .B -par tkID=PAR
 sets visual track pixel aspect ratio (PAR=Num:Den or "none").
@@ -393,7 +393,7 @@ decrypts a specific track using ISMA AES CTR 128. drm_file can be omitted if key
 .B \-set-kms [tkID=]kms_uri
 changes KMS location for all tracks or a given one if tkID is specified.
 .TP
-.B \DRM file syntax for GPAC ISMACryp
+.B DRM file syntax for GPAC ISMACryp
 File is XML and shall start with xml header. File root is an "ISMACryp" element. File is a list of "ISMACrypTrack" elements. 
 .br
 ISMACrypTrack attributes:
@@ -512,13 +512,13 @@ exports given text track to SRT subtitle format.
 dumps to stdout rather than file.
 .TP
 .B \-stat
-generates statitistic report on node/field usage for the whole presentation.
+generates statistics report on node/field usage for the whole presentation.
 .TP
 .B \-stats
-generates statistic report on node/field usage per BIFS Access Unit.
+generates statistics report on node/field usage per BIFS Access Unit.
 .TP
 .B \-statx
-generates statistic report on node/field usage in the scene graph after each BIFS Access Unit.
+generates statistics report on node/field usage in the scene graph after each BIFS Access Unit.
 .TP
 .B \-hash
 generates SHA-1 Hash of the input file.
@@ -620,7 +620,7 @@ source of updates - default: null.
 .B \-rap=TIME
 duration in ms of base carousel - default: 0 (off). you can specify the RAP period of a single ESID (not in DIMS) with -rap=ESID=X:time.
 .TP
-.B \Runtime Options
+.B Runtime Options
 The following options can be used at prompt:
 .br
 q: quits

@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,33 +11,41 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
- *		
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
  */
 
 #include "sdl_out.h"
 
-static Bool is_init = 0;
+static Bool is_init = GF_FALSE;
 static u32 num_users = 0;
+
+#if (defined(WIN32) || defined(_WIN32_WCE)) && !defined(__GNUC__)
+#if SDL_VERSION_ATLEAST(2,0,0)
+#pragma comment(lib, "SDL2")
+#else
+#pragma comment(lib, "SDL")
+#endif
+#endif
 
 Bool SDLOUT_InitSDL()
 {
 	if (is_init) {
 		num_users++;
-		return 1;
+		return GF_TRUE;
 	}
-	if (SDL_Init(0) < 0) return 0;
-	is_init = 1;
+	if (SDL_Init(0) < 0) return GF_FALSE;
+	is_init = GF_TRUE;
 	num_users++;
-	return 1;
+	return GF_TRUE;
 }
 
 void SDLOUT_CloseSDL()
@@ -51,28 +59,28 @@ void SDLOUT_CloseSDL()
 
 
 /*interface query*/
-GF_EXPORT
-const u32 *QueryInterfaces() 
+GPAC_MODULE_EXPORT
+const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
 		GF_VIDEO_OUTPUT_INTERFACE,
 		GF_AUDIO_OUTPUT_INTERFACE,
 		0
 	};
-	return si; 
+	return si;
 }
 
 /*interface create*/
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
-	if (InterfaceType == GF_VIDEO_OUTPUT_INTERFACE) return SDL_NewVideo();
-	if (InterfaceType == GF_AUDIO_OUTPUT_INTERFACE) return SDL_NewAudio();
+	if (InterfaceType == GF_VIDEO_OUTPUT_INTERFACE) return (GF_BaseInterface*)SDL_NewVideo();
+	if (InterfaceType == GF_AUDIO_OUTPUT_INTERFACE) return (GF_BaseInterface*)SDL_NewAudio();
 	return NULL;
 }
 
 /*interface destroy*/
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -84,3 +92,5 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 		break;
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( sdl_out )

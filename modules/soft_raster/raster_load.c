@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2000-2012
  *					All rights reserved
  *
@@ -11,17 +11,17 @@
  *  it under the terms of the GNU Lesser General Public License as published by
  *  the Free Software Foundation; either version 2, or (at your option)
  *  any later version.
- *   
+ *
  *  GPAC is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU Lesser General Public License for more details.
- *   
+ *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA. 
+ *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- *		
+ *
  */
 
 #include "rast_soft.h"
@@ -31,6 +31,7 @@ GF_Raster2D *EVG_LoadRenderer()
 {
 	GF_Raster2D *dr;
 	GF_SAFEALLOC(dr, GF_Raster2D);
+	if (!dr) return NULL;
 	GF_REGISTER_MODULE_INTERFACE(dr, GF_RASTER_2D_INTERFACE, "GPAC 2D Raster", "gpac distribution")
 
 
@@ -47,7 +48,6 @@ GF_Raster2D *EVG_LoadRenderer()
 	dr->stencil_set_tiling = evg_stencil_set_tiling;
 	dr->stencil_set_filter = evg_stencil_set_filter;
 	dr->stencil_set_color_matrix = evg_stencil_set_color_matrix;
-	dr->stencil_create_texture = evg_stencil_create_texture;
 	dr->stencil_texture_modified = NULL;
 
 	dr->surface_new = evg_surface_new;
@@ -74,17 +74,17 @@ void EVG_ShutdownRenderer(GF_Raster2D *dr)
 
 #ifndef GPAC_STANDALONE_RENDER_2D
 
-GF_EXPORT
-const u32 *QueryInterfaces() 
+GPAC_MODULE_EXPORT
+const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
 		GF_RASTER_2D_INTERFACE,
 		0
 	};
-	return si; 
+	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	if (InterfaceType==GF_RASTER_2D_INTERFACE) {
@@ -93,12 +93,14 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	return NULL;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	if (ifce->InterfaceType == GF_RASTER_2D_INTERFACE) {
 		EVG_ShutdownRenderer((GF_Raster2D *)ifce);
 	}
 }
+
+GPAC_MODULE_STATIC_DECLARATION( soft_raster )
 
 #endif

@@ -1,7 +1,7 @@
 /*
  *			GPAC - Multimedia Framework C SDK
  *
- *			Authors: Jean Le Feuvre 
+ *			Authors: Jean Le Feuvre
  *			Copyright (c) Telecom ParisTech 2005-2012
  *					All rights reserved
  *
@@ -93,7 +93,7 @@ static GF_Err LSR_DetachStream(GF_BaseDecoder *plug, u16 ES_ID)
 }
 
 static GF_Err LSR_ProcessData(GF_SceneDecoder*plug, const char *inBuffer, u32 inBufferLength,
-								u16 ES_ID, u32 AU_time, u32 mmlevel)
+                              u16 ES_ID, u32 AU_time, u32 mmlevel)
 {
 	GF_Err e = GF_OK;
 	LSRPriv *priv = (LSRPriv *)plug->privateStack;
@@ -118,17 +118,17 @@ static u32 LSR_CanHandleStream(GF_BaseDecoder *ifce, u32 StreamType, GF_ESD *esd
 void DeleteLSRDec(GF_BaseDecoder *plug)
 {
 	LSRPriv *priv;
-        if (!plug)
-          return;
-        priv = (LSRPriv *)plug->privateStack;
-        if (priv){
-          /*in case something went wrong*/
-          if (priv->codec)
-            gf_laser_decoder_del(priv->codec);
-          priv->codec = NULL;
-          gf_free(priv);
-          plug->privateStack = NULL;
-        }
+	if (!plug)
+		return;
+	priv = (LSRPriv *)plug->privateStack;
+	if (priv) {
+		/*in case something went wrong*/
+		if (priv->codec)
+			gf_laser_decoder_del(priv->codec);
+		priv->codec = NULL;
+		gf_free(priv);
+		plug->privateStack = NULL;
+	}
 	gf_free(plug);
 }
 
@@ -140,6 +140,10 @@ GF_BaseDecoder *NewLSRDec()
 	GF_SAFEALLOC(tmp, GF_SceneDecoder);
 	if (!tmp) return NULL;
 	GF_SAFEALLOC(priv, LSRPriv);
+	if (!priv) {
+		gf_free(tmp);
+		return NULL;
+	}
 	priv->codec = NULL;
 	tmp->privateStack = priv;
 	tmp->AttachStream = LSR_AttachStream;
@@ -157,7 +161,7 @@ GF_BaseDecoder *NewLSRDec()
 #endif
 
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 const u32 *QueryInterfaces()
 {
 	static u32 si [] = {
@@ -169,7 +173,7 @@ const u32 *QueryInterfaces()
 	return si;
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 GF_BaseInterface *LoadInterface(u32 InterfaceType)
 {
 	switch (InterfaceType) {
@@ -182,7 +186,7 @@ GF_BaseInterface *LoadInterface(u32 InterfaceType)
 	}
 }
 
-GF_EXPORT
+GPAC_MODULE_EXPORT
 void ShutdownInterface(GF_BaseInterface *ifce)
 {
 	switch (ifce->InterfaceType) {
@@ -194,3 +198,5 @@ void ShutdownInterface(GF_BaseInterface *ifce)
 	}
 }
 
+
+GPAC_MODULE_STATIC_DECLARATION( laser )
